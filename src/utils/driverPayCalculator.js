@@ -198,8 +198,12 @@ function calculatePerLoadDriverPay({ load = null, driverRate = 0, ruleRate = 0, 
   // Priority 3: Company-wide Load Pay Schedules (managed in Company Admin -> Payroll -> Load Pay Schedules e.g. Sydney -> Melbourne = $500)
   if (effectiveRate <= 0 && load) {
     try {
-      const companyCtrl = require('../controllers/CompanyAdminPortalController');
-      const store = companyCtrl?.driverLoadScheduleStore || {};
+      let store = {};
+      try {
+        const companyCtrl = require('../controllers/CompanyAdminPortalController');
+        store = companyCtrl?.driverLoadScheduleStore || {};
+      } catch (e) {}
+
       const companyId = driver?.companyId || load?.companyId || 'default';
       const companySchedules = store[companyId] || store['default'] || [
         { origin: 'Sydney', destination: 'Melbourne', rate: 500.00 },

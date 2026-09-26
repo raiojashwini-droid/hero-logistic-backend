@@ -1552,6 +1552,21 @@ exports.updateDeliveryItemStatus = async (req, res, next) => {
         where: { id: itemId, load: { driverId: driver.id } },
         data: { status: delivered ? 'DELIVERED' : 'PENDING' }
       }).catch(() => null);
+
+      if (delivered) {
+        const itemObj = await prisma.loadItem.findUnique({ where: { id: itemId }, include: { load: true } }).catch(() => null);
+        if (itemObj?.loadId) {
+          const allItems = await prisma.loadItem.findMany({ where: { loadId: itemObj.loadId } }).catch(() => []);
+          const allDelivered = allItems.length > 0 && allItems.every(it => it.status === 'DELIVERED');
+          if (allDelivered) {
+            await prisma.load.update({ where: { id: itemObj.loadId }, data: { status: 'DELIVERED' } }).catch(() => null);
+            try {
+              const { autoCreditDriverPayroll } = require('./CompanyAdminPortalController');
+              await autoCreditDriverPayroll(itemObj.loadId, driver.id, driver.companyId);
+            } catch (e) {}
+          }
+        }
+      }
     }
 
     return sendSuccess(res, { success: true, message: delivered ? 'Vehicle marked as Delivered' : 'Vehicle marked as Not Delivered' });

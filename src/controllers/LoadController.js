@@ -5,6 +5,7 @@ const { HTTP_STATUS, ERROR_CODES } = require('../config/constants');
 const LoadService = require('../services/LoadService');
 
 const { getTenantWhere, resolveCompanyId } = require('../middlewares/tenantResolver');
+const { cleanLoadPayload } = require('./CompanyAdminPortalController');
 
 const getEffectiveCompanyId = (req) => {
   return resolveCompanyId(req);
@@ -333,8 +334,10 @@ exports.create = async (req, res, next) => {
     delete payload.driverPay;
     delete payload.driverRate;
 
+    const cleanedPayload = cleanLoadPayload(payload);
+
     const data = await prisma.load.create({
-      data: payload,
+      data: cleanedPayload,
       include: {
         driver: true,
         truck: true,
@@ -349,6 +352,15 @@ exports.create = async (req, res, next) => {
         const { autoGenerateLoadInvoice } = require('./CompanyAdminPortalController');
         if (typeof autoGenerateLoadInvoice === 'function') {
           await autoGenerateLoadInvoice(data.id, data.companyId, agreedRate);
+        }
+      } catch (e) {}
+    }
+
+    if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status) && data.driverId) {
+      try {
+        const { autoCreditDriverPayroll } = require('./CompanyAdminPortalController');
+        if (typeof autoCreditDriverPayroll === 'function') {
+          await autoCreditDriverPayroll(data.id, data.driverId, data.companyId);
         }
       } catch (e) {}
     }
@@ -446,9 +458,11 @@ exports.update = async (req, res, next) => {
       }
     }
 
+    const cleanedData = cleanLoadPayload(updateData);
+
     const data = await prisma.load.update({
       where: { id: targetLoad.id },
-      data: updateData,
+      data: cleanedData,
       include: {
         driver: true,
         truck: true,
@@ -458,7 +472,7 @@ exports.update = async (req, res, next) => {
       }
     });
 
-    if (updateData.status === 'DELIVERED') {
+    if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(updateData.status) || ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status)) {
       try {
         const { autoGenerateLoadInvoice, autoCreditDriverPayroll } = require('./CompanyAdminPortalController');
         if (typeof autoGenerateLoadInvoice === 'function') {
@@ -578,7 +592,7 @@ exports.updateStatus = async (req, res, next) => {
 
     const data = await LoadService.updateStatus(id, status, reason, companyId);
 
-    if (status === 'DELIVERED' || status === 'COMPLETED') {
+    if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(status) || ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status)) {
       try {
         const { autoGenerateLoadInvoice, autoCreditDriverPayroll } = require('./CompanyAdminPortalController');
         if (typeof autoGenerateLoadInvoice === 'function') {

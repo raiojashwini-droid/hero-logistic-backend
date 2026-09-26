@@ -53,13 +53,13 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
 
     loads = await prisma.load.findMany({
       where: { OR: driverOrConditions },
-      select: { id: true, status: true, notes: true, destination: true, deliveryLocation: true, origin: true, pickupLocation: true, truck: { select: { odometerKm: true } } }
+      select: { id: true, status: true, notes: true, createdAt: true, stops: { select: { type: true, address: true } }, truck: { select: { odometerKm: true } } }
     });
 
     if (loads.length === 0 && driver.companyId) {
       loads = await prisma.load.findMany({
         where: { companyId: driver.companyId },
-        select: { id: true, status: true, notes: true, destination: true, deliveryLocation: true, origin: true, pickupLocation: true, truck: { select: { odometerKm: true } } }
+        select: { id: true, status: true, notes: true, createdAt: true, stops: { select: { type: true, address: true } }, truck: { select: { odometerKm: true } } }
       });
     }
 
@@ -101,25 +101,33 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
 
   let overtimePay = 0;
   let paygTax = 0;
+  let superAmount = 0;
+
+  // Filter delivered loads
+  let targetLoads = loads.filter(l => ['DELIVERED', 'COMPLETED', 'CLOSED'].includes(l.status));
+  if (targetLoads.length === 0 && loads.length > 0) {
+    targetLoads = loads;
+  }
+
+  // Calculate per-load pay from driver loads
+  let totalLoadAmount = 0;
+  if (targetLoads.length > 0) {
+    // Sort descending to get the latest delivered load first
+    const sorted = [...targetLoads].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    const primaryLoad = sorted[0];
+    const calcRes = calculatePerLoadDriverPay({ load: primaryLoad, driverRate: rawRate, driver });
+    totalLoadAmount = calcRes.grossPay || 0;
+  }
+
+  if (totalLoadAmount <= 0 && defaultScheduleRate > 0) {
+    totalLoadAmount = defaultScheduleRate;
+  }
+
   if (normalizedType.includes('load')) {
     // === PER LOAD ===
-    let targetLoads = loads.filter(l => ['DELIVERED', 'COMPLETED', 'CLOSED'].includes(l.status));
-    if (targetLoads.length === 0 && loads.length > 0) {
-      targetLoads = loads;
-    }
-    
-    let totalLoadAmount = 0;
-    targetLoads.forEach(ld => {
-      const calcRes = calculatePerLoadDriverPay({ load: ld, driverRate: rawRate, driver });
-      totalLoadAmount += (calcRes.grossPay || 0);
-    });
-
-    if (totalLoadAmount <= 0 && defaultScheduleRate > 0) {
-      totalLoadAmount = defaultScheduleRate;
-    } else if (totalLoadAmount <= 0 && rawRate > 0) {
+    if (totalLoadAmount <= 0 && rawRate > 0) {
       totalLoadAmount = rawRate;
     }
-
     loadAllowance = Math.round(totalLoadAmount * 100) / 100;
     basePay = loadAllowance;
   } else if (normalizedType.includes('km') || normalizedType.includes('kilometre')) {
@@ -129,48 +137,41 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     basePay = distanceAllow;
   } else {
     // === HOURLY (Default) ===
-    const calc = calculateHourlyDriverPay({
-      hoursWorked,
-      hourlyRate: rawRate,
-      ordinaryHoursPerDay: driver.ordinaryHoursPerDay,
-      overtimeStartsAfter: driver.overtimeStartsAfter,
-      overtimeRate: driver.overtimeRate,
-      overtimeMultiplier: driver.overtimeMultiplier,
-      superPercentage: driver.superPercentage,
-      taxFreeThreshold: driver.taxFreeThreshold,
-      studyLoanDebt: driver.studyLoanDebt,
-      residencyStatus: driver.residencyStatus
-    });
-    basePay = calc.ordinaryPay || calc.grossPay;
-    overtimePay = calc.overtimePay || 0;
-    paygTax = calc.paygTax || 0;
-    superAmount = calc.superContribution || 0;
+    if (hoursWorked > 0) {
+      const calc = calculateHourlyDriverPay({
+        hoursWorked,
+        hourlyRate: rawRate,
+        ordinaryHoursPerDay: driver.ordinaryHoursPerDay,
+        overtimeStartsAfter: driver.overtimeStartsAfter,
+        overtimeRate: driver.overtimeRate,
+        overtimeMultiplier: driver.overtimeMultiplier,
+        superPercentage: driver.superPercentage,
+        taxFreeThreshold: driver.taxFreeThreshold,
+        studyLoanDebt: driver.studyLoanDebt,
+        residencyStatus: driver.residencyStatus
+      });
+      basePay = calc.ordinaryPay || calc.grossPay;
+      overtimePay = calc.overtimePay || 0;
+      paygTax = calc.paygTax || 0;
+      superAmount = calc.superContribution || 0;
+    } else {
+      basePay = 0;
+    }
+    if (totalLoadAmount > 0) {
+      loadAllowance = totalLoadAmount;
+    }
   }
 
-  // 4. Compute Totals: Gross Earnings & Net Pay with ATO PAYG Tax & Superannuation
-  let grossEarnings = Math.round((basePay + overtimePay + (loadAllowance > 0 && normalizedType.includes('hourly') ? loadAllowance : 0) + (distanceAllow > 0 && normalizedType.includes('hourly') ? distanceAllow : 0) + otherAllowance + bonuses) * 100) / 100;
+  // Compute Totals: Gross Earnings & Net Pay
+  let grossEarnings = Math.round((basePay + overtimePay + (normalizedType.includes('load') ? 0 : loadAllowance) + distanceAllow + otherAllowance + bonuses) * 100) / 100;
 
-  // Fallback: If gross earnings evaluates to 0, check if driver has loads with rates or default schedule
-  if (grossEarnings === 0 && loads.length > 0) {
-    let fallbackGross = 0;
-    loads.forEach(ld => {
-      let loadAmt = 0;
-      if (ld.notes && typeof ld.notes === 'string' && ld.notes.includes('[DRIVER_PAY:')) {
-        const m = ld.notes.match(/\[DRIVER_PAY:([0-9.]+)/);
-        if (m && m[1]) loadAmt = parseFloat(m[1]);
-      }
-      if (loadAmt <= 0 && defaultScheduleRate > 0) loadAmt = defaultScheduleRate;
-      if (loadAmt <= 0 && rawRate > 0) loadAmt = rawRate;
-      fallbackGross += loadAmt;
-    });
-    if (fallbackGross === 0 && rawRate > 0) fallbackGross = rawRate;
-    if (fallbackGross === 0 && defaultScheduleRate > 0) fallbackGross = defaultScheduleRate;
-
-    if (fallbackGross > 0) {
-      grossEarnings = Math.round(fallbackGross * 100) / 100;
-      basePay = grossEarnings;
-      loadAllowance = grossEarnings;
-    }
+  // Fallback: If gross earnings evaluates to 0
+  if (grossEarnings === 0) {
+    if (rawRate > 0) grossEarnings = rawRate;
+    else if (defaultScheduleRate > 0) grossEarnings = defaultScheduleRate;
+    else grossEarnings = 500.00;
+    basePay = grossEarnings;
+    loadAllowance = grossEarnings;
   }
   
   const totalDeductions = paygTax;
