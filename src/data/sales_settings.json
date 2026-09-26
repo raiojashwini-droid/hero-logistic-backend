@@ -1,0 +1,37 @@
+{
+  "templates": {
+    "Welcome Sandbox Invite": {
+      "subject": "Welcome to Hero Logistics System Trial (Updated)",
+      "body": "Hi {{contact_name}},\n\nYour 14-day evaluation sandbox for {{company_name}} is provisioned.\n\nBest,\n{{rep_name}}"
+    },
+    "Follow-Up Pricing Quote": {
+      "subject": "Hero Logistics SaaS Agreement — Pricing Follow-Up",
+      "body": "Hi {{contact_name}},\n\nFollowing up on the proposal we sent for {{company_name}}. Happy to schedule a quick call to walk through the pricing tiers and answer any questions.\n\nBest,\n{{rep_name}}"
+    },
+    "Demo Confirmation": {
+      "subject": "Your Hero Logistics Demo is Confirmed",
+      "body": "Hi {{contact_name}},\n\nThis is a confirmation that your live product walkthrough demo for {{company_name}} is scheduled. You'll receive calendar invites shortly.\n\nBest,\n{{rep_name}}"
+    },
+    "Trial Expiry Reminder": {
+      "subject": "Your {{company_name}} Trial is Expiring Soon",
+      "body": "Hi {{contact_name}},\n\nYour 14-day trial for {{company_name}} is about to expire. Let's connect to discuss converting your sandbox to a full SaaS license.\n\nBest,\n{{rep_name}}"
+    }
+  },
+  "stages": [
+    "New Lead",
+    "Contacted",
+    "Demo Booked",
+    "Demo Completed",
+    "Trial Started",
+    "Proposal Sent",
+    "Negotiation",
+    "Won",
+    "Lost"
+  ],
+  "sources": [
+    "Google Search",
+    "LinkedIn",
+    "Partner Referral",
+    "Cold Call"
+  ]
+}

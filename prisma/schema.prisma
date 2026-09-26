@@ -1,0 +1,3025 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// Enums
+enum Role {
+  SUPER_ADMIN
+  PLATFORM_OWNER
+  PLATFORM_ADMIN
+  SALES
+  ONBOARDING
+  SUPPORT_AGENT
+  PLATFORM_FINANCE
+  TECHNICAL_SUPPORT
+  AUDITOR
+  COMPANY_ADMIN
+  DISPATCHER
+  DRIVER
+  WAREHOUSE
+  YARD
+  ACCOUNTS
+  CUSTOMER
+  USER
+}
+
+enum CompanyStatus {
+  PROVISIONING
+  ACTIVE
+  HOLD
+  SUSPENDED
+  TRIAL
+  CLOSED
+}
+
+enum TicketStatus {
+  OPEN
+  RESOLVED
+  WAITING_CUSTOMER
+  WAITING_INTERNAL
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  FAILED
+}
+
+enum BillingPeriod {
+  MONTHLY
+  ANNUALLY
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  HOLD
+  PAST_DUE
+  SUSPENDED
+  EXPIRED
+  CANCELLED
+}
+
+enum PlanStatus {
+  DRAFT
+  PUBLISHED
+  DEPRECATED
+}
+
+enum FeatureLicensingType {
+  CORE
+  PREMIUM
+  ENTERPRISE_ONLY
+  ADD_ON
+}
+
+enum FeatureStatus {
+  ENABLED
+  DISABLED
+  DEPRECATED
+}
+
+enum OverrideStatus {
+  FORCE_ENABLED
+  FORCE_DISABLED
+}
+
+enum PromoType {
+  PERCENTAGE
+  FIXED
+  TRIAL_EXTENSION
+}
+
+enum PromoStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  UNPAID
+}
+
+enum ThemeStatus {
+  PUBLISHED
+  DRAFT
+  ARCHIVED
+}
+
+enum DomainStatus {
+  ACTIVE
+  PENDING
+  FAILED
+}
+
+enum TemplateType {
+  WELCOME_EMAIL
+  RESET_PASSWORD
+  DRIVER_INVITE
+  COMPANY_INVITE
+}
+
+enum ReleaseStatus {
+  PUBLISHED
+  ARCHIVED
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  VERIFIED
+  OPERATIONAL
+  ACTIVE
+  NOT_CONNECTED
+}
+
+enum IntegrationHealth {
+  HEALTHY
+  WARNING
+  ERROR
+  UNKNOWN
+}
+
+enum TransferStatus {
+  COMPLETED
+  IN_TRANSIT
+  PENDING_APPROVAL
+  REJECTED
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum IntegrationType {
+  ELD
+  ACCOUNTING
+  CUSTOM
+}
+
+enum LoadStatus {
+  DRAFT
+  REQUESTED
+  PLANNED
+  ASSIGNED
+  IN_TRANSIT
+  ACTIVE
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum LoadPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum StopType {
+  PICKUP
+  DROPOFF
+}
+
+enum PhotoStage {
+  PICKUP_CONDITION
+  LOADING_COR
+  DELIVERY_CONDITION
+}
+
+enum VehicleCategory {
+  TRUCK
+  TRAILER
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CustomerType {
+  BUSINESS
+  CORPORATE
+  INDIVIDUAL
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum VehicleStatus {
+  IN_TRANSIT
+  IDLE
+  MAINTENANCE
+  ALERT
+}
+
+enum DriverStatus {
+  ON_DUTY
+  OFF_DUTY
+  ON_LEAVE
+  UNAVAILABLE
+  AVAILABLE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CASUAL
+  CONTRACTOR
+}
+
+enum AssetStatus {
+  ACTIVE
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+enum AssetCondition {
+  NEW
+  GOOD
+  FAIR
+  POOR
+}
+
+enum StockStatus {
+  IN_STORAGE
+  STAGED
+  TO_MOVE
+  DISPATCHED
+}
+
+enum MovementType {
+  RECEIVE
+  MOVE
+  TRANSFER
+  STAGE
+  DISPATCH
+  RETURN
+  INBOUND
+  OUTBOUND
+  ADJUSTMENT
+}
+
+enum LeadStage {
+  NEW_LEAD
+  CONTACTED
+  DEMO_BOOKED
+  DEMO_COMPLETED
+  TRIAL_STARTED
+  PROPOSAL_SENT
+  NEGOTIATING
+  WON
+  LOST
+}
+
+enum DemoStatus {
+  UPCOMING
+  COMPLETED
+  MISSED
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
+enum TaskStatus {
+  PENDING
+  COMPLETED
+  MISSED
+}
+
+enum ShiftStatus {
+  SCHEDULED
+  ON_SHIFT
+  COMPLETED
+  ABSENT
+  ON_LEAVE
+}
+
+enum MessageType {
+  DIRECT
+  GROUP
+  SYSTEM_ALERT
+}
+
+enum ReportCategory {
+  OPERATIONS
+  FINANCIAL
+  COMPLIANCE
+  ANALYTICS
+}
+
+enum ReportScheduleFreq {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum ChecklistItemStatus {
+  YES
+  NO
+  PASS
+  FAIL
+  NA
+  NOT_CHECKED
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum TimesheetEventType {
+  CLOCK_IN
+  CLOCK_OUT
+  BREAK_START
+  BREAK_END
+  NOTE
+}
+
+enum PayPeriodStatus {
+  DRAFT
+  PROCESSING
+  PAID
+  PENDING
+  CANCELLED
+}
+
+enum PayFrequency {
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+}
+
+enum VinScanResult {
+  PICKED_UP
+  DELIVERED
+  WRONG_VEHICLE
+}
+
+enum OfflineSyncStatus {
+  PENDING
+  UPLOADING
+  SYNCED
+  FAILED
+  QUEUED
+}
+
+enum OfflineSyncType {
+  PRE_START
+  PHOTO
+  POD_SIGNATURE
+  FUEL
+  TRAILER_SWAP
+  DAMAGE_REPORT
+  CHECKLIST
+}
+
+enum LoadLaneStatus {
+  EMPTY
+  IN_PROGRESS
+  READY_TO_DISPATCH
+  FULL
+  HOLD
+}
+
+enum MovementResult {
+  COMPLETED
+  FAILED
+  IN_PROGRESS
+  CANCELLED
+}
+
+enum LabelType {
+  VIN
+  PALLET
+  QR_CODE
+  CONTAINER
+  LOAD
+  LOCATION
+  HOLDING_AREA
+  LOAD_LANE
+  CUSTOM
+}
+
+enum PrintJobStatus {
+  PRINTING
+  QUEUED
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+enum PrinterStatus {
+  ONLINE
+  OFFLINE
+  IDLE
+  ERROR
+}
+
+enum PrinterType {
+  THERMAL
+  LASER
+}
+
+enum WarehouseDocType {
+  OUTBOUND_MANIFEST
+  INBOUND_MANIFEST
+  BOL
+  CUSTOMS
+  PACKING_LIST
+}
+
+// ----------------------------------------------------------------------
+// WAREHOUSE & YARD: YARD ATTENDANT TASK MANAGEMENT (PHASE D)
+// ----------------------------------------------------------------------
+
+model YardTask {
+  id          String  @id @default(uuid())
+  title       String
+  description String? @db.Text
+  status      String  @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+  priority    String  @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  taskType    String  @default("GENERAL") // SPOT, RELOCATE, INSPECT, AUDIT, GENERAL
+
+  gate        String? // e.g. "Gate 4"
+  trailerRef  String? // e.g. "TR-9410"
+  dueDate     DateTime?
+  completedAt DateTime?
+  notes       String?   @db.Text
+
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
+  userId String?
+  user   User?   @relation("AssignedYardTasks", fields: [userId], references: [id])
+
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([driverId])
+  @@index([warehouseId])
+  @@index([status])
+  @@map("yard_task")
+}
+
+// ----------------------------------------------------------------------
+// SUPER ADMIN & TENANT CORE MODELS
+// ----------------------------------------------------------------------
+model User {
+  id       String  @id @default(uuid())
+  email    String  @unique
+  password String
+  name     String?
+  role     Role    @default(USER)
+
+  userCode String?    @unique // e.g., US-1001
+  phone    String?
+  status   UserStatus @default(PENDING)
+
+  dob              String?
+  address          String?
+  emergencyContact String?
+
+  customRoleId String?
+  customRole   CustomRole? @relation(fields: [customRoleId], references: [id])
+
+  companyId         String?
+  company           Company?          @relation(fields: [companyId], references: [id])
+  assignedTickets   SupportTicket[]
+  ticketReplies     TicketReply[]
+  sessions          UserSession[]
+  apiLogs           ApiUsageLog[]
+  moduleUsage       ModuleUsageLog[]
+  managedCustomers  Customer[]        @relation("AccountManager")
+  managedDrivers    Driver[]          @relation("DriverManager")
+  driverProfile     Driver?           @relation("DriverUser")
+  managedWarehouses Warehouse[]       @relation("WarehouseManager")
+  assignedAssets    AssetAssignment[]
+  itemMovements     ItemMovement[]
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  salesLeads      Lead[]          @relation("SalesRepresentative")
+  presentedDemos  DemoBooking[]   @relation("DemoPresenter")
+  salesTasks      FollowUpTask[]  @relation("TaskOwner")
+  salesActivities SalesActivity[] @relation("ActivityPerformer")
+
+  shifts            Shift[]
+  conversationParts ConversationParticipant[]
+  sentMessages      Message[]
+  createdReports    Report[]                  @relation("ReportCreator")
+  yardTasks         YardTask[]                @relation("AssignedYardTasks")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user")
+}
+
+model Company {
+  id             String        @id @default(uuid())
+  tenantId       String?       @unique // e.g., #TEN-1
+  isSandbox      Boolean       @default(false)
+  leadId         String?       @unique
+  name           String
+  status         CompanyStatus @default(ACTIVE)
+  trialExpiry    DateTime?
+  lastLogin      DateTime?
+  accountManager String?
+  country        String?
+  storageUsedGB  Float         @default(0)
+
+  registrationNumber String?
+  dotNumber          String?
+  taxId              String?
+  defaultTaxRate     Float         @default(0.10)
+  adminEmail         String?
+  cardBrand          String? // e.g., "Visa"
+  cardLast4          String? // e.g., "8812"
+  cardExpiry         String? // e.g., "09/2029"
+
+  defaultBusinessHours Json? // e.g., { "monday": { "open": "08:00", "close": "18:00" } }
+  nicheCarCarrying     Boolean @default(false)
+  nicheGeneralFreight  Boolean @default(true)
+  nicheHazmat          Boolean @default(false)
+  defaultNiche         String  @default("General Freight")
+
+  canSendTransfers     Boolean @default(true)
+  canReceiveTransfers  Boolean @default(true)
+  autoApproveTransfers Boolean @default(false)
+
+  tenantSubscription  TenantSubscription?
+  users               User[]
+  customRoles         CustomRole[]
+  branches            Branch[]
+  drivers             Driver[]
+  vehicles            Vehicle[]
+  loads               Load[]
+  tickets             SupportTicket[]
+  billingRecords      BillingRecord[]
+  auditLogs           AuditLog[]
+  whiteLabelConfig    WhiteLabelConfig?
+  companyIntegrations CompanyIntegration[]
+  customers           Customer[]
+  featureOverrides    CompanyFeatureOverride[]
+  userSessions        UserSession[]
+  apiLogs             ApiUsageLog[]
+  moduleUsage         ModuleUsageLog[]
+  storageAudit        CompanyStorageAudit?
+  sentTransfers       AssetTransfer[]          @relation("SentTransfers")
+  receivedTransfers   AssetTransfer[]          @relation("ReceivedTransfers")
+  aiActivityLogs      AiActivityLog[]
+
+  shifts        Shift[]
+  conversations Conversation[]
+  reports       Report[]
+
+  preStartChecklists PreStartChecklist[]
+  timesheets         Timesheet[]
+  payPeriods         PayPeriod[]
+  equipmentSwaps     EquipmentSwap[]
+  offlineSyncItems   OfflineSyncItem[]
+  expenses           LoadExpense[]
+  driverMessages     DriverMessage[]
+  incidents          DriverIncident[]
+  yardTasks          YardTask[]
+
+  lanePricingRules      LanePricingRule[]
+  vehicleTypeRates      VehicleTypeRate[]
+  fuelSurchargeLogs     FuelSurchargeLog[]
+  workflowRules         WorkflowRule[]
+  aiModelRegistries     AiModelRegistry[]
+  notificationTemplates NotificationTemplate[]
+  notificationRules     NotificationRule[]
+  onboardingHandovers   OnboardingHandover[]
+  recipientGroups       RecipientGroup[]
+
+  securityRetentionDays  String?  @default("90 Days")
+  securityTwoFactorAuth  Boolean? @default(true)
+  securityIpWhitelisting Boolean? @default(false)
+  securitySessionTimeout String?  @default("30 Minutes")
+  securityAuditAlerts    Boolean? @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("company")
+}
+
+model SubscriptionPlan {
+  id                  String               @id @default(uuid())
+  name                String // Starter, Professional, Enterprise
+  monthlyPrice        Float
+  version             String               @default("1.0.0")
+  status              PlanStatus           @default(PUBLISHED)
+  description         String?              @db.Text
+  trialDays           Int                  @default(14)
+  usersLimit          Int                  @default(0) // 0 implies unlimited, or explicit limit
+  driversLimit        Int                  @default(0)
+  vehiclesLimit       Int                  @default(0)
+  branchesLimit       Int                  @default(0)
+  storageLimitGB      Int                  @default(10)
+  apiCallsLimit       Int                  @default(10000)
+  createdBy           String               @default("System Root")
+  tenantSubscriptions TenantSubscription[]
+  planFeatures        PlanFeature[]
+  versionLogs         PlanVersionLog[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@map("subscription_plan")
+}
+
+model SupportTicket {
+  id             String         @id @default(uuid())
+  ticketNumber   Int            @unique @default(autoincrement())
+  subject        String
+  message        String         @db.Text
+  category       String // e.g. General / Platform
+  priority       TicketPriority @default(MEDIUM)
+  status         TicketStatus   @default(OPEN)
+  assigneeTier   String? // e.g. L2 Senior Specialist
+  resolutionNote String?        @db.Text
+
+  assignedAgentId String?
+  assignedAgent   User?   @relation(fields: [assignedAgentId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  replies TicketReply[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("support_ticket")
+}
+
+model BillingRecord {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique // e.g., INV-1001A
+  amount        Float
+  status        InvoiceStatus @default(DRAFT)
+  paymentMethod String?
+  periodStart   DateTime?
+  periodEnd     DateTime?
+  date          DateTime      @default(now())
+
+  planTierSnapshot String? // e.g., "Professional"
+  dueDate          DateTime?
+  taxAmount        Float     @default(0)
+  pdfUrl           String? // Link to the generated invoice PDF
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  paymentAttempts PaymentAttempt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("billing_record")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String   @db.Text
+  operator  String?
+  ipAddress String?
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@map("audit_log")
+}
+
+model WhiteLabelConfig {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id])
+
+  platformName    String  @default("Logistics OS")
+  portalName      String  @default("Enterprise Tenant Portal")
+  shortName       String  @default("HeroLog")
+  loaderGifUrl    String?
+  logoLightUrl    String?
+  logoDarkUrl     String?
+  faviconUrl      String?
+  loginBgUrl      String?
+  dashboardBgUrl  String?
+  emailLogoUrl    String?
+  invoiceLogoUrl  String?
+  manifestLogoUrl String?
+  fontFamily      String  @default("Inter")
+  typographyStyle String  @default("Modern Sans")
+
+  hideBrandingLabels Boolean @default(false)
+  hideSystemLinks    Boolean @default(false)
+
+  buttonRadius String @default("16px")
+
+  activeThemeId String?
+  activeTheme   Theme?  @relation(fields: [activeThemeId], references: [id])
+
+  pdfHeaderText String?
+  pdfFooterText String?
+  pdfWatermark  Boolean @default(false)
+  pdfQrCode     Boolean @default(false)
+
+  loginGreeting     String?
+  loginIllustration String?
+  supportUrl        String?
+
+  mfaEnforced        Boolean @default(false)
+  sessionTimeoutMins Int     @default(30)
+  allowedIps         String? @db.Text
+
+  domains      CustomDomain[]
+  templates    CommunicationTemplate[]
+  releases     WhiteLabelReleaseLog[]
+  integrations ApiIntegration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("white_label_config")
+}
+
+model Feature {
+  id                   String               @id @default(uuid())
+  uniqueId             String               @unique // e.g., feat-base-shell
+  name                 String
+  description          String?              @db.Text
+  version              String               @default("1.0.0")
+  category             String // e.g., Administration, Dispatch, Fleet
+  licensingType        FeatureLicensingType @default(CORE)
+  status               FeatureStatus        @default(ENABLED)
+  apiLoadEst           Int? // Monthly API load estimate
+  storageEstGB         Float? // Storage capacity estimate
+  performanceFootprint String? // Low, Medium, High
+
+  planFeatures     PlanFeature[]
+  versionLogs      FeatureVersionLog[]
+  companyOverrides CompanyFeatureOverride[]
+  usageLogs        ModuleUsageLog[]
+
+  dependencies FeatureDependency[] @relation("DependsOn")
+  dependentOn  FeatureDependency[] @relation("IsDependencyFor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("feature")
+}
+
+model PlanFeature {
+  id               String           @id @default(uuid())
+  planId           String
+  featureId        String
+  isEnabled        Boolean          @default(false)
+  subscriptionPlan SubscriptionPlan @relation(fields: [planId], references: [id])
+  feature          Feature          @relation(fields: [featureId], references: [id])
+
+  @@unique([planId, featureId])
+  @@map("plan_feature")
+}
+
+model Branch {
+  id         String      @id @default(uuid())
+  name       String
+  location   String?
+  companyId  String
+  company    Company     @relation(fields: [companyId], references: [id])
+  drivers    Driver[]
+  warehouses Warehouse[]
+  assets     Asset[]
+  users      User[]
+  loads      Load[]
+  vehicles   Vehicle[]
+  customers  Customer[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@map("branch")
+}
+
+// ----------------------------------------------------------------------
+// TENANT COMMAND CENTRE & DISPATCH
+// ----------------------------------------------------------------------
+
+model Driver {
+  id         String  @id @default(uuid())
+  driverCode String? @unique // e.g., DRV-009
+
+  // 1. Personal Information
+  firstName        String?
+  lastName         String?
+  avatarUrl        String?   @db.LongText
+  dob              DateTime?
+  gender           String?
+  nationality      String?
+  phone            String?
+  email            String?   @unique
+  emergencyContact String? // Name + Phone combined or JSON
+  address          String?
+  city             String?
+  state            String?
+  postalCode       String?
+
+  // 2. Employment Information
+  status         DriverStatus   @default(AVAILABLE)
+  employmentType EmploymentType?
+  role           String? // e.g., "Driver"
+  category       String? // e.g., "Heavy Rig"
+  joiningDate    DateTime?
+  shift          String? // e.g., "Morning"
+
+  branchId  String?
+  branch    Branch? @relation(fields: [branchId], references: [id])
+  managerId String?
+  manager   User?   @relation("DriverManager", fields: [managerId], references: [id])
+
+  // 3. Licence Information
+  licenseType      String? // e.g., "MR (Medium Rigid)"
+  licenseNumber    String?
+  licenseState     String?
+  licenseIssueDate DateTime?
+  licenseExpiry    DateTime?
+  licenseClass     String? // e.g., "Class HR"
+  licenseDocUrl    String?
+
+  // 4. Compliance & Operations
+  complianceScore Float?    @default(100) // e.g., 92.0
+  fatigueBreach   Boolean   @default(false)
+  riskLevel       RiskLevel @default(LOW)
+  dgCertified     Boolean   @default(false) // Dangerous Goods
+  hvCertified     Boolean   @default(false) // Heavy Vehicle
+
+  // 5. Payroll Information
+  payType             String?   // e.g., "Daily", "Hourly", "Per Load", "Per Km"
+  payRate             Float?    // e.g., 350.00
+  ordinaryHoursPerDay Float?    @default(7.6)
+  overtimeStartsAfter Float?    @default(7.6)
+  overtimeRate        Float?    // Direct overtime rate per hour (Primary)
+  overtimeMultiplier  Float?    @default(1.5) // Optional / Fallback multiplier
+  defaultBreakMinutes Int?      @default(30) // Default unpaid break duration in minutes
+  tfnStatus           String?   @default("Provided") // "Provided", "Exempt", "Pending", "Not Provided"
+  taxFreeThreshold    Boolean   @default(true)
+  studyLoanDebt       Boolean   @default(false)
+  taxDeclReceived     Boolean   @default(true)
+  residencyStatus     String?   @default("Australian Resident")
+  paygCalcMethod      String?   @default("ATO Scale")
+  superPercentage     Float?    @default(12.0)
+  effectiveFrom       DateTime?
+  effectiveTo         DateTime?
+  loadPaySchedule     String?   @db.Text // JSON array of named per-load rate choices
+  bankName            String?
+  accountNumber       String?
+  routingNumber       String?   // BSB
+  taxNumber           String?   // TFN/ABN
+  superFund           String?   // e.g., "AustralianSuper"
+
+  // 6. Availability & Preferences
+  availableFrom    DateTime?
+  preferredVehicle String?
+  preferredRoutes  String?
+  preferredRegions String?
+  maxDistPerTripKm Int?
+  weeklyHoursLimit Int?
+  maxHoursPerDay   Int?
+  restDaysPerWeek  Int?
+  workingDays      String? // JSON array e.g., '["Mon", "Tue"]'
+
+  // 7. Internal Notes
+  notes            String? @db.Text
+  internalComments String? @db.Text
+
+  // Relations
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  userId String? @unique // Link to User for app login credentials
+  user   User?   @relation("DriverUser", fields: [userId], references: [id])
+
+  loads          Load[]
+  currentVehicle Vehicle[]  @relation("CurrentDriver")
+  documents      Document[]
+
+  shifts           Shift[]
+  telemetryHistory TelemetryLog[]
+
+  preStartChecklists PreStartChecklist[]
+  timesheets         Timesheet[]
+  payPeriods         PayPeriod[]
+  equipmentSwaps     EquipmentSwap[]
+  vinScanEvents      VinScanEvent[]
+  deliveryPods       DeliveryPOD[]
+  offlineSyncItems   OfflineSyncItem[]
+  performanceLogs    PerformanceLog[]
+  allowances         DriverAllowance[]
+  deductions         DriverDeduction[]
+  leaveRequests      DriverLeaveRequest[]
+  payRates           DriverPayRate[]
+  activities         DriverActivity[]
+  driverMessages     DriverMessage[]
+  incidents          DriverIncident[]
+  yardTasks          YardTask[]
+  superInfo          DriverSuperInfo?
+  expenses           LoadExpense[]
+  notifications      Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver")
+}
+
+model PerformanceLog {
+  id         String  @id @default(uuid())
+  date       String
+  assignment String
+  route      String
+  score      String
+  status     String  @default("EXCELLENT")
+  remarks    String? @db.Text
+  evaluator  String?
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("performance_log")
+}
+
+model DriverAllowance {
+  id       String @id @default(uuid())
+  name     String
+  category String
+  type     String
+  amount   String
+  date     String
+  status   String @default("Approved")
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_allowance")
+}
+
+model DriverDeduction {
+  id        String @id @default(uuid())
+  name      String
+  type      String
+  frequency String
+  amount    String
+  status    String @default("Active")
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_deduction")
+}
+
+model DriverLeaveRequest {
+  id       String  @id @default(uuid())
+  type     String
+  dates    String
+  days     String
+  approver String  @default("HR Director")
+  status   String  @default("Pending Approval")
+  notes    String? @db.Text
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_leave_request")
+}
+
+model DriverPayRate {
+  id       String @id @default(uuid())
+  category String
+  type     String
+  rate     String
+  rule     String
+  status   String @default("Active")
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_pay_rate")
+}
+
+model DriverActivity {
+  id          String  @id @default(uuid())
+  title       String
+  category    String  @default("Assignments")
+  status      String  @default("Verified")
+  description String  @db.Text
+  performedBy String  @default("Fleet Admin User")
+  time        String?
+  date        String?
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_activity")
+}
+
+model DriverMessage {
+  id           String  @id @default(uuid())
+  subject      String?
+  message      String? @db.Text
+  body         String? @db.Text
+  sender       String? @default("Fleet Admin")
+  senderName   String?
+  senderRole   String?
+  recipient    String?
+  category     String? @default("General")
+  status       String  @default("Sent")
+  isFromDriver Boolean @default(false)
+  isRead       Boolean @default(false)
+  important    Boolean @default(false)
+  isGroup      Boolean @default(false)
+  meta         String?
+  threadId     String?
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_message")
+}
+
+model DriverSuperInfo {
+  id              String @id @default(uuid())
+  fundName        String @default("AustralianSuper")
+  memberNumber    String @default("AS-102948")
+  usi             String @default("STA0100AU")
+  rate            String @default("11.5%")
+  ytdContribution String @default("$0.00")
+  status          String @default("Active & Compliant")
+
+  driverId String @unique
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_super_info")
+}
+
+model Vehicle {
+  id               String          @id @default(uuid())
+  category         VehicleCategory @default(TRUCK)
+  make             String?
+  model            String?
+  plate            String?
+  rego             String?         @unique // e.g., ABC123
+  vin              String?         @unique
+  odometerKm       Int             @default(0)
+  maintenanceDueKm Int?
+  photoUrl         String?         @db.Text
+
+  // Registration
+  regType       String?
+  regState      String?
+  regIssueDate  DateTime?
+  regExpiryDate DateTime?
+  fuelType      String?
+  color         String?
+  engineNumber  String?
+
+  // Preferences
+  primaryMechanic  String?
+  preferredRoutes  String?
+  preferredRegions String?
+  maxDistPerTripKm Int?
+  dgCertified      Boolean @default(false)
+  hvCertified      Boolean @default(false)
+
+  // Live Telemetry
+  status          VehicleStatus @default(IDLE)
+  currentLocation String? // e.g., "Hume Hwy, NSW"
+  currentSpeed    Float? // e.g., 68.0 km/h
+  fuelLevel       Float? // e.g., 72.0 %
+  engineTemp      Float? // e.g., 18.0 °C
+  lastPing        DateTime?
+
+  currentDriverId String?
+  currentDriver   Driver? @relation("CurrentDriver", fields: [currentDriverId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  truckLoads   Load[]        @relation("TruckToLoad")
+  trailerLoads Load[]        @relation("TrailerToLoad")
+  documents    Document[]
+  expenses     LoadExpense[]
+
+  telemetryHistory   TelemetryLog[]
+  prevEquipmentSwaps EquipmentSwap[] @relation("PrevTrailerSwap")
+  newEquipmentSwaps  EquipmentSwap[] @relation("NewTrailerSwap")
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("vehicle")
+}
+
+model Load {
+  id            String       @id @default(uuid())
+  draftId       String?      @unique // e.g., DRAFT-1092
+  loadRef       String       @unique // e.g., PO-12548
+  type          String // e.g., "Car Carrying"
+  status        LoadStatus   @default(DRAFT)
+  priority      LoadPriority @default(NORMAL)
+  loadDate      DateTime?
+  notes         String?      @db.Text
+  dispatchNotes String?      @db.Text // Captures reassignment notes / dispatch reasons
+
+  itemMovements ItemMovement[]
+
+  deliveryEta  DateTime?
+  pickupStopId String?
+  sourceType   String    @default("MANUAL") // e.g., "EMAIL", "PORTAL"
+  aiExtracted  Boolean   @default(false)
+  aiConfidence Float? // e.g., 94.0
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
+  truckId String?
+  truck   Vehicle? @relation("TruckToLoad", fields: [truckId], references: [id])
+
+  trailerId String?
+  trailer   Vehicle? @relation("TrailerToLoad", fields: [trailerId], references: [id])
+
+  stops      RouteStop[]
+  items      LoadItem[]
+  expenses   LoadExpense[]
+  documents  Document[]
+  activities LoadActivity[]
+  invoices   CustomerInvoice[]
+
+  messages Message[]
+
+  vinScanEvents      VinScanEvent[]
+  deliveryPods       DeliveryPOD[]
+  preStartChecklists PreStartChecklist[]
+
+  loadLaneId String?
+  loadLane   LoadLane? @relation(fields: [loadLaneId], references: [id])
+
+  stagingAreaId String?
+  stagingArea   StagingArea? @relation(fields: [stagingAreaId], references: [id])
+
+  incidents DriverIncident[]
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("load")
+}
+
+model TenantSubscription {
+  id             String             @id @default(uuid())
+  subId          String             @unique // e.g., SUB-1005
+  companyId      String             @unique
+  company        Company            @relation(fields: [companyId], references: [id])
+  planId         String
+  plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
+  status         SubscriptionStatus @default(ACTIVE)
+  billingPeriod  BillingPeriod      @default(MONTHLY)
+  startDate      DateTime           @default(now())
+  nextRenewal    DateTime
+  amount         Float
+  autoRenewal    Boolean            @default(true)
+  paymentGateway String? // e.g., Stripe Autopay
+
+  usersQuota     Int?
+  storageQuotaGb Float?
+  mostUsedModule String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenant_subscription")
+}
+
+model PlanVersionLog {
+  id        String           @id @default(uuid())
+  planId    String
+  plan      SubscriptionPlan @relation(fields: [planId], references: [id])
+  version   String
+  changelog String           @db.Text
+  operator  String           @default("System Root")
+  createdAt DateTime         @default(now())
+
+  @@map("plan_version_log")
+}
+
+model PromoCode {
+  id              String      @id @default(uuid())
+  code            String      @unique // e.g., WELCOME10
+  campaignName    String
+  type            PromoType
+  discountValue   Float? // Used for PERCENTAGE or FIXED
+  extensionDays   Int? // Used for TRIAL_EXTENSION
+  maxRedemptions  Int?
+  redemptionCount Int         @default(0)
+  expiryDate      DateTime?
+  status          PromoStatus @default(ACTIVE)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@map("promo_code")
+}
+
+model FeatureDependency {
+  id           String  @id @default(uuid())
+  featureId    String
+  dependencyId String
+  feature      Feature @relation("DependsOn", fields: [featureId], references: [id])
+  dependency   Feature @relation("IsDependencyFor", fields: [dependencyId], references: [id])
+
+  @@unique([featureId, dependencyId])
+  @@map("feature_dependency")
+}
+
+model CompanyFeatureOverride {
+  id        String         @id @default(uuid())
+  companyId String
+  featureId String
+  company   Company        @relation(fields: [companyId], references: [id])
+  feature   Feature        @relation(fields: [featureId], references: [id])
+  status    OverrideStatus
+  reason    String         @db.Text
+  operator  String         @default("System Root")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([companyId, featureId])
+  @@map("company_feature_override")
+}
+
+model FeatureVersionLog {
+  id        String   @id @default(uuid())
+  featureId String
+  feature   Feature  @relation(fields: [featureId], references: [id])
+  version   String
+  changelog String   @db.Text
+  operator  String   @default("System Root")
+  createdAt DateTime @default(now())
+
+  @@map("feature_version_log")
+}
+
+model Theme {
+  id           String             @id @default(uuid())
+  name         String
+  status       ThemeStatus        @default(DRAFT)
+  accentColor  String
+  sidebarColor String
+  headerColor  String
+  configs      WhiteLabelConfig[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@map("theme")
+}
+
+model CustomDomain {
+  id                String           @id @default(uuid())
+  domain            String           @unique
+  fallbackSubdomain String?
+  routingRule       String           @default("Force HTTPS")
+  sslStatus         DomainStatus     @default(PENDING)
+  sslExpiry         DateTime?
+  dnsCheckPassed    Boolean          @default(false)
+  healthStatus      String           @default("Unknown")
+  configId          String
+  whiteLabelConfig  WhiteLabelConfig @relation(fields: [configId], references: [id])
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@map("custom_domain")
+}
+
+model CommunicationTemplate {
+  id               String           @id @default(uuid())
+  type             TemplateType
+  subject          String
+  greeting         String
+  bodyHtml         String           @db.Text
+  configId         String
+  whiteLabelConfig WhiteLabelConfig @relation(fields: [configId], references: [id])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([configId, type])
+  @@map("communication_template")
+}
+
+model WhiteLabelReleaseLog {
+  id               String           @id @default(uuid())
+  version          String
+  buildNumber      Int
+  status           ReleaseStatus
+  changelog        String           @db.Text
+  operator         String
+  durationSeconds  Int
+  configId         String
+  whiteLabelConfig WhiteLabelConfig @relation(fields: [configId], references: [id])
+  createdAt        DateTime         @default(now())
+
+  @@map("white_label_release_log")
+}
+
+model ApiIntegration {
+  id               String            @id @default(uuid())
+  serviceName      String // e.g., Cloudflare, S3, Stripe
+  status           IntegrationStatus @default(NOT_CONNECTED)
+  health           IntegrationHealth @default(UNKNOWN)
+  configId         String
+  whiteLabelConfig WhiteLabelConfig  @relation(fields: [configId], references: [id])
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([configId, serviceName])
+  @@map("api_integration")
+}
+
+model TicketReply {
+  id        String        @id @default(uuid())
+  message   String        @db.Text
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id])
+  authorId  String
+  author    User          @relation(fields: [authorId], references: [id])
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@map("ticket_reply")
+}
+
+model PaymentAttempt {
+  id              String        @id @default(uuid())
+  amount          Float
+  status          PaymentStatus @default(PENDING) // PAID, PENDING, FAILED
+  gatewayResponse String?       @db.Text // Error payload from Stripe/ACH
+  transactionId   String?       @unique // e.g., ch_1M...
+  billingRecordId String
+  billingRecord   BillingRecord @relation(fields: [billingRecordId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@map("payment_attempt")
+}
+
+model UserSession {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId  String?
+  company    Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  tokenHash  String?   @db.Text
+  ipAddress  String?
+  userAgent  String?   @db.Text
+  status     String    @default("ACTIVE") // ACTIVE, EXPIRED, LOGGED_OUT
+  loginTime  DateTime  @default(now())
+  loginAt    DateTime  @default(now())
+  lastPingAt DateTime  @default(now())
+  logoutTime DateTime?
+  logoutAt   DateTime?
+  expiresAt  DateTime?
+  isActive   Boolean   @default(true)
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([status])
+  @@index([loginAt])
+  @@index([lastPingAt])
+  @@map("user_session")
+}
+
+model ApiUsageLog {
+  id             String   @id @default(uuid())
+  companyId      String?
+  company        Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  endpoint       String
+  method         String // GET, POST, PUT, DELETE
+  statusCode     Int
+  responseTimeMs Int
+  timestamp      DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([timestamp])
+  @@index([statusCode])
+  @@map("api_usage_log")
+}
+
+model ModuleUsageLog {
+  id           String   @id @default(uuid())
+  companyId    String?
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  featureId    String?
+  feature      Feature? @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  moduleKey    String?
+  moduleName   String?
+  accessCount  Int      @default(0)
+  accessedAt   DateTime @default(now())
+  lastAccessed DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([moduleKey])
+  @@index([accessedAt])
+  @@map("module_usage_log")
+}
+
+model AssetTransfer {
+  id             String         @id @default(uuid())
+  transferNumber String         @unique // e.g., TRF-501
+  status         TransferStatus @default(PENDING_APPROVAL)
+  payloadName    String // e.g., Tesla Model 3 — VIN-901
+
+  senderCompanyId String
+  senderCompany   Company @relation("SentTransfers", fields: [senderCompanyId], references: [id])
+
+  receiverCompanyId String
+  receiverCompany   Company @relation("ReceivedTransfers", fields: [receiverCompanyId], references: [id])
+
+  auditTrails TransferEventLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("asset_transfer")
+}
+
+model TransferEventLog {
+  id               String        @id @default(uuid())
+  transferId       String
+  transfer         AssetTransfer @relation(fields: [transferId], references: [id])
+  eventDescription String        @db.Text // e.g., "Request submitted" or "Rejected: lacks Hazmat License"
+  timestamp        DateTime      @default(now())
+
+  @@map("transfer_event_log")
+}
+
+model AiModule {
+  id                  String  @id @default(uuid())
+  name                String  @unique // e.g., "Load Parse AI"
+  isActiveGlobally    Boolean @default(true)
+  confidenceThreshold Float? // e.g., 85.0 for 85%
+  dailyApiLimit       Int? // e.g., 1000
+  totalRequests       Int     @default(0)
+
+  activityLogs AiActivityLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_module")
+}
+
+model AiActivityLog {
+  id       String   @id @default(uuid())
+  moduleId String
+  module   AiModule @relation(fields: [moduleId], references: [id])
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  eventDescription String   @db.Text // e.g., "Confidence threshold crossed — load #LDX-9021 rejected"
+  isAnomaly        Boolean  @default(false)
+  timestamp        DateTime @default(now())
+
+  @@map("ai_activity_log")
+}
+
+model CustomRole {
+  id        String   @id @default(uuid())
+  name      String // e.g., "Dispatcher"
+  slug      String? // machine-readable key e.g. "DISPATCHER" — unique for system roles
+  isSystem  Boolean  @default(false) @map("is_system") // System roles cannot be deleted or renamed
+  companyId String? // Optional: If null, it's a global platform role
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  permissions CustomPermission[]
+  users       User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([slug, companyId]) // unique per company (or globally if companyId is null)
+  @@map("custom_role")
+}
+
+model CustomPermission {
+  id     String     @id @default(uuid())
+  roleId String
+  role   CustomRole @relation(fields: [roleId], references: [id])
+
+  module       String // e.g., "Dashboard & Analytics"
+  actionString String // e.g., "dashboard analytics view"
+
+  createdAt DateTime @default(now())
+
+  @@map("custom_permission")
+}
+
+model CompanyIntegration {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  providerName    String // e.g., "Geotab ELD", "Xero Accounting"
+  integrationType IntegrationType   @default(ELD)
+  status          IntegrationStatus @default(NOT_CONNECTED)
+
+  apiKey   String?
+  lastSync DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, providerName])
+  @@map("company_integration")
+}
+
+model Customer {
+  id        String         @id @default(uuid())
+  companyId String
+  company   Company        @relation(fields: [companyId], references: [id])
+  name      String // e.g., "ABC Motors Pty Ltd"
+  abn       String? // e.g., "12 345 678 901"
+  type      CustomerType   @default(BUSINESS)
+  status    CustomerStatus @default(ACTIVE)
+
+  contactName String?
+  email       String?
+  phone       String?
+
+  billingTerms     String? // e.g., "14 Days EOM"
+  transportModules String? // JSON array string e.g., '["CAR_CARRYING", "GENERAL_FREIGHT"]'
+
+  accountManagerId String?
+  accountManager   User?             @relation("AccountManager", fields: [accountManagerId], references: [id])
+  loads            Load[]
+  loadItems        LoadItem[]
+  invoices         CustomerInvoice[]
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("customer")
+}
+
+// ----------------------------------------------------------------------
+// DISPATCH: WORKFORCE & SHIFTS
+// ----------------------------------------------------------------------
+
+model Shift {
+  id       String  @id @default(uuid())
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id])
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
+  role      String // e.g., Car Carrier Driver, Mechanic, Dispatcher
+  date      DateTime @db.Date
+  startTime DateTime
+  endTime   DateTime
+
+  status ShiftStatus @default(SCHEDULED)
+  notes  String?     @db.Text
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("shift")
+}
+
+// ----------------------------------------------------------------------
+// DISPATCH: MESSAGING & COMMS
+// ----------------------------------------------------------------------
+
+model Conversation {
+  id    String      @id @default(uuid())
+  type  MessageType @default(DIRECT)
+  title String? // For groups e.g., "Yard Team - Melbourne"
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("conversation")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+
+  joinedAt   DateTime  @default(now())
+  lastReadAt DateTime?
+
+  @@map("conversation_participant")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id])
+
+  content String  @db.Text
+  loadId  String? // Optional: Message can reference a specific Load
+  load    Load?   @relation(fields: [loadId], references: [id])
+
+  attachmentUrl String?
+  isSystem      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@map("message")
+}
+
+// ----------------------------------------------------------------------
+// DISPATCH: REPORTS & ANALYTICS
+// ----------------------------------------------------------------------
+
+model Report {
+  id          String         @id @default(uuid())
+  name        String
+  category    ReportCategory @default(OPERATIONS)
+  description String?        @db.Text
+  metrics     String // JSON array of selected metrics
+
+  createdBy String?
+  creator   User?   @relation("ReportCreator", fields: [createdBy], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  schedules ReportSchedule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("report")
+}
+
+model ReportSchedule {
+  id       String @id @default(uuid())
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id])
+
+  frequency  ReportScheduleFreq @default(WEEKLY)
+  nextRunAt  DateTime
+  recipients String // JSON array of emails or User IDs
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("report_schedule")
+}
+
+// ----------------------------------------------------------------------
+// LIVE TELEMETRY HISTORY
+// ----------------------------------------------------------------------
+
+model TelemetryLog {
+  id        String  @id @default(uuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
+  latitude  Float
+  longitude Float
+  speedKmh  Float?
+  heading   String? // e.g., "NE", "SW"
+  event     String? // e.g., "Departed", "Arrived", "Traffic Incident"
+
+  timestamp DateTime @default(now())
+
+  @@map("telemetry_log")
+}
+
+// ----------------------------------------------------------------------
+// SUPER ADMIN SALES & CRM
+// ----------------------------------------------------------------------
+
+model Lead {
+  id          String  @id @default(uuid())
+  companyName String // e.g., Vance Refrigeration
+  contactName String // e.g., Robert Vance
+  email       String
+  phone       String?
+
+  fleetSize       String? // e.g., 12 Trucks
+  transportNiche  String? // e.g., Car Carrying, Dangerous Goods
+  currentSoftware String? // e.g., Spreadsheets (Excel)
+
+  estimatedValue Float? // e.g., 3500.00
+  score          Int?      @default(0) // e.g., 65
+  stage          LeadStage @default(NEW_LEAD)
+  source         String? // e.g., Google Search, LinkedIn
+  painPoints     String?   @db.Text
+
+  repId String?
+  rep   User?   @relation("SalesRepresentative", fields: [repId], references: [id])
+
+  // Handover state
+  handoverTarget  DateTime?
+  handoverPercent Int?      @default(0)
+
+  demos      DemoBooking[]
+  proposals  Proposal[]
+  tasks      FollowUpTask[]
+  activities SalesActivity[]
+  handover   OnboardingHandover?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("lead")
+}
+
+model DemoBooking {
+  id     String @id @default(uuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id])
+
+  presenterId String
+  presenter   User   @relation("DemoPresenter", fields: [presenterId], references: [id])
+
+  scheduledAt DateTime
+  status      DemoStatus @default(UPCOMING)
+  meetingLink String?
+  feedback    String?    @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@map("demo_booking")
+}
+
+model Proposal {
+  id          String @id @default(uuid())
+  proposalRef String @unique // e.g., PROP-405
+  version     String @default("V1")
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id])
+
+  baseValue      Float
+  discountAmount Float @default(0)
+  finalValue     Float
+
+  validityDays Int            @default(30)
+  status       ProposalStatus @default(DRAFT)
+
+  includedModules String? // JSON array e.g., ["Real-Time GPS", "Factoring API"]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("proposal")
+}
+
+model FollowUpTask {
+  id     String @id @default(uuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id])
+
+  repId String
+  rep   User   @relation("TaskOwner", fields: [repId], references: [id])
+
+  type        String // e.g., Call, Email, Touchpoint
+  description String     @db.Text
+  dueDate     DateTime
+  status      TaskStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+
+  @@map("follow_up_task")
+}
+
+model SalesActivity {
+  id     String @id @default(uuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id])
+
+  title       String // e.g., Lead Created, Proposal Sent
+  description String @db.Text
+
+  performedById String?
+  performedBy   User?   @relation("ActivityPerformer", fields: [performedById], references: [id])
+
+  timestamp DateTime @default(now())
+
+  @@map("sales_activity")
+}
+
+model OnboardingHandover {
+  id             String   @id @default(uuid())
+  leadId         String   @unique
+  lead           Lead     @relation(fields: [leadId], references: [id])
+  companyName    String
+  primaryContact String
+  adminEmail     String
+  adminPhone     String?
+  transportNiche String?
+  fleetSize      String?
+  selectedPlan   String?
+  billingFreq    String?  @default("Monthly")
+  agreedPrice    Float?
+  status         String   @default("READY_FOR_PROVISIONING")
+  notes          String?  @db.Text
+  companyId      String?
+  company        Company? @relation(fields: [companyId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("onboarding_handover")
+}
+
+model EmailTemplate {
+  id        String   @id @default(uuid())
+  name      String   @unique // e.g., Welcome Sandbox Invite
+  subject   String
+  body      String   @db.Text
+  variables String? // JSON array e.g., ["contact_name", "company_name"]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("email_template")
+}
+
+model RouteStop {
+  id     String @id @default(uuid())
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id])
+
+  type          StopType
+  sequenceIndex Int // 0, 1, 2 for ordering
+  address       String
+  contactName   String?
+  contactPhone  String?
+  scheduledDate DateTime?
+
+  pickupItems  LoadItem[] @relation("PickupStop")
+  dropoffItems LoadItem[] @relation("DropoffStop")
+
+  @@map("route_stop")
+}
+
+model LoadItem {
+  id     String  @id @default(uuid())
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  pickupStopId String?
+  pickupStop   RouteStop? @relation("PickupStop", fields: [pickupStopId], references: [id])
+
+  dropoffStopId String?
+  dropoffStop   RouteStop? @relation("DropoffStop", fields: [dropoffStopId], references: [id])
+
+  sku         String?
+  description String?
+  quantity    Int?    @default(0)
+  unitPrice   Float?  @default(0)
+  minQuantity Int?    @default(0)
+  reservedQty Int?    @default(0)
+  category    String?
+  location    String?
+  unit        String? @default("EA")
+  status      String?
+
+  rego            String?
+  vin             String?
+  stockRef        String?
+  make            String?
+  model           String?
+  year            Int?
+  color           String?
+  lengthMm        Int?
+  widthMm         Int?
+  heightMm        Int?
+  weightKg        Int?
+  vehicleType     String?
+  keys            Boolean @default(true)
+  damageReportReq Boolean @default(false)
+  
+  // General Freight Fields
+  pallets         Int?
+  cubicMetres     Float?
+  fragile         Boolean @default(false)
+  stackable       Boolean @default(false)
+  specialHandling String?
+
+  // Dangerous Goods Fields
+  unNumber            String?
+  dgClass             String?
+  packingGroup        String?
+  hazchemCode         String?
+  msdsUploaded        Boolean @default(false)
+  emergencyContact    String?
+  complianceChecklist Boolean @default(false)
+  placarding          Boolean @default(false)
+
+  notes           String? @db.Text
+
+  aiConfidence Float? // e.g., 94.0 for High confidence
+
+  // WMS Additions
+  warehouseId      String?
+  warehouse        Warehouse?      @relation(fields: [warehouseId], references: [id])
+  zone             String? // e.g., "Zone A"
+  row              String? // e.g., "Row 4"
+  bay              String? // e.g., "Bay 12"
+  position         String? // e.g., "P01"
+  stockStatus      StockStatus     @default(IN_STORAGE)
+  receivedDate     DateTime?
+  inboundReceiptId String?
+  inboundReceipt   InboundReceipt? @relation(fields: [inboundReceiptId], references: [id])
+  movements        ItemMovement[]
+
+  // Warehouse Portal: assign to Load Lane or Staging Area
+  loadLaneId String?
+  loadLane   LoadLane? @relation(fields: [loadLaneId], references: [id])
+
+  stagingAreaId String?
+  stagingArea   StagingArea? @relation(fields: [stagingAreaId], references: [id])
+
+  photos        ProofPhoto[]
+  vinScanEvents VinScanEvent[]
+  deliveryPods  DeliveryPOD[]
+
+  @@map("load_item")
+}
+
+model ProofPhoto {
+  id     String   @id @default(uuid())
+  itemId String
+  item   LoadItem @relation(fields: [itemId], references: [id])
+
+  stage     PhotoStage
+  fileUrl   String
+  gpsLat    Float?
+  gpsLng    Float?
+  timestamp DateTime   @default(now())
+
+  @@map("proof_photo")
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CustomerInvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+}
+
+model LoadExpense {
+  id     String  @id @default(uuid())
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  date        DateTime      @default(now())
+  type        String // e.g., "Fuel", "Toll", "Maintenance"
+  description String
+  amount      Float
+  status      ExpenseStatus @default(PENDING)
+
+  // Direct relationship to vehicle and driver for general/vehicle expenses
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+
+  // Enhanced for Driver Portal Fuel & Expenses screen
+  vendorName    String? // e.g., "BP Service Centre - Yass NSW"
+  litres        Float? // e.g., 68 (fuel litres)
+  pricePerLitre Float? // e.g., 2.05
+  odometer      Int? // e.g., 450789 km at time of expense
+  receiptUrl    String? // Uploaded receipt image/PDF URL
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("load_expense")
+}
+
+model LoadActivity {
+  id     String @id @default(uuid())
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id])
+
+  title       String // e.g., "Departed Pickup"
+  description String   @db.Text
+  timestamp   DateTime @default(now())
+
+  @@map("load_activity")
+}
+
+model CustomerInvoice {
+  id            String @id @default(uuid())
+  invoiceNumber String @unique // e.g., INV-2025-089
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  loadId String? @unique
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  amount         Float
+  appliedTaxRate Float                 @default(0.10)
+  status         CustomerInvoiceStatus @default(DRAFT)
+  dueDate DateTime?
+  pdfUrl  String?
+  notes   String?               @db.Text
+  items   Json?
+  type    String?               @default("Freight")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("customer_invoice")
+}
+
+// WMS & Assets models
+model Warehouse {
+  id     String @id @default(uuid())
+  code   String @unique // e.g., WH-001
+  name   String
+  type   String @default("General")
+  status String @default("Active")
+  photoUrl String? @db.Text
+
+  // Sizing & Capabilities
+  totalAreaSqm   Int?
+  palletCapacity Int?
+  loadingDocks   Int?
+  features       String? // JSON array e.g., ["Cold Storage", "Dangerous Goods"]
+
+  // Location
+  address    String?
+  city       String?
+  state      String?
+  postalCode String?
+
+  // Manager
+  managerId String?
+  manager   User?   @relation("WarehouseManager", fields: [managerId], references: [id])
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id])
+
+  assets          Asset[]
+  inboundReceipts InboundReceipt[]
+  stockItems      LoadItem[]
+  warehouseStaff  Driver[]
+
+  loadLanes    LoadLane[]
+  stagingAreas StagingArea[]
+  printers     NetworkedPrinter[]
+  labelPrints  WarehouseLabelPrint[]
+  printJobs    PrintSpoolerJob[]
+  documents    Document[]
+  yardTasks    YardTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("warehouse")
+}
+
+model InboundReceipt {
+  id            String  @id @default(uuid())
+  receiptNo     String  @unique // e.g., GR-1038
+  supplier      String
+  referenceNote String? // Delivery note
+  transportType String?
+  driverName    String?
+  vehicleRef    String?
+
+  // Enhanced for Warehouse Portal Receive screen
+  inboundType String  @default("Purchase / Supplier Delivery")
+  status      String  @default("Pending") // Pending, Receiving, Completed
+  notes       String? @db.Text
+
+  stagingAreaId String? // Where items will be placed on arrival
+  stagingArea   StagingArea? @relation(fields: [stagingAreaId], references: [id])
+
+  receivingDate DateTime
+  warehouseId   String
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+
+  items LoadItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("inbound_receipt")
+}
+
+model ItemMovement {
+  id     String   @id @default(uuid())
+  itemId String
+  item   LoadItem @relation(fields: [itemId], references: [id])
+
+  type         MovementType
+  fromLocation String?
+  toLocation   String
+  quantity     Int?         @default(1)
+
+  // Enhanced for Warehouse Portal Movement History screen
+  movementRef String? // e.g., MT-1045
+  reason      String? // e.g., "Repositioning", "Transfer to Lane"
+  result      MovementResult @default(COMPLETED)
+
+  loadLaneId String? // Which lane items moved to/from
+  loadLane   LoadLane? @relation(fields: [loadLaneId], references: [id])
+
+  stagingAreaId String? // Which staging area
+  stagingArea   StagingArea? @relation(fields: [stagingAreaId], references: [id])
+
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  performedById String?
+  performedBy   User?   @relation(fields: [performedById], references: [id])
+
+  status      String    @default("Completed") // Legacy field kept for compat
+  performedAt DateTime? @default(now())
+  timestamp   DateTime  @default(now())
+
+  @@map("item_movement")
+}
+
+model Asset {
+  id           String  @id @default(uuid())
+  assetId      String  @unique // e.g., AST-0001
+  name         String
+  category     String // e.g., Forklifts, Containers
+  type         String // e.g., Diesel Forklift
+  make         String?
+  model        String?
+  year         Int?
+  serialNumber String?
+  photoUrl     String? @db.Text
+  iotDeviceId  String?
+
+  status    AssetStatus    @default(ACTIVE)
+  condition AssetCondition @default(GOOD)
+
+  operatingHours Float?    @default(0)
+  nextServiceDue DateTime?
+
+  purchaseDate   DateTime?
+  purchasePrice  Float?
+  bookValue      Float?
+  supplier       String?
+  warrantyExpiry DateTime?
+
+  branchId    String
+  branch      Branch     @relation(fields: [branchId], references: [id])
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  documents   Document[]
+  maintenance AssetMaintenance[]
+  assignments AssetAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("asset")
+}
+
+model AssetAssignment {
+  id      String @id @default(uuid())
+  assetId String
+  asset   Asset  @relation(fields: [assetId], references: [id])
+
+  assignedTo     String // e.g., "Warehouse 1" or "Dispatch Team"
+  purpose        String?
+  expectedReturn DateTime?
+
+  assignedById String
+  assignedBy   User   @relation(fields: [assignedById], references: [id])
+
+  status    String    @default("Current") // Current, Completed
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+
+  @@map("asset_assignment")
+}
+
+model AssetMaintenance {
+  id      String @id @default(uuid())
+  assetId String
+  asset   Asset  @relation(fields: [assetId], references: [id])
+
+  type        String // e.g., Service, Inspection
+  priority    String @default("Medium")
+  description String
+
+  intervalHours Int?
+  intervalDays  Int?
+
+  lastPerformed DateTime?
+  nextDue       DateTime?
+  status        String    @default("Scheduled") // Scheduled, Due Soon, Completed
+
+  cost          Float?
+  downtimeHours Float?
+
+  createdAt DateTime @default(now())
+
+  @@map("asset_maintenance")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: PRE-START SAFETY CHECKLIST
+// ----------------------------------------------------------------------
+
+model PreStartChecklist {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  vehicleRef String? // e.g., TRK-101 (MAN TGX 26.580)
+  trailerRef String? // e.g., TRL-205 (Car Carrier 4 Level)
+
+  date        DateTime  @db.Date
+  submittedAt DateTime?
+
+  totalItems  Int @default(20)
+  passedCount Int @default(0)
+  failedCount Int @default(0)
+  naCount     Int @default(0)
+
+  isDraft Boolean @default(true)
+  notes   String? @db.Text
+
+  gpsLat Float?
+  gpsLng Float?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  items ChecklistItemResponse[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pre_start_checklist")
+}
+
+model ChecklistItemResponse {
+  id          String            @id @default(uuid())
+  checklistId String
+  checklist   PreStartChecklist @relation(fields: [checklistId], references: [id])
+
+  itemNumber Int // 1-20
+  itemLabel  String // e.g., "Brakes (service & park brake)"
+  status     ChecklistItemStatus @default(NOT_CHECKED)
+  notes      String?
+
+  @@map("checklist_item_response")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: TIMESHEET & CLOCK IN/OUT
+// ----------------------------------------------------------------------
+
+model Timesheet {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  date   DateTime        @db.Date
+  status TimesheetStatus @default(DRAFT)
+
+  clockInAt  DateTime?
+  clockOutAt DateTime?
+
+  workMinutes  Int @default(0)
+  breakMinutes Int @default(0)
+  totalMinutes Int @default(0)
+  overtimeMin  Int @default(0)
+
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  approvedBy  String? // User ID of approver
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  events TimesheetEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("timesheet")
+}
+
+model TimesheetEvent {
+  id          String    @id @default(uuid())
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id])
+
+  type      TimesheetEventType
+  timestamp DateTime           @default(now())
+
+  gpsLat       Float?
+  gpsLng       Float?
+  locationName String? // e.g., "Yard - Melbourne VIC"
+
+  note           String? @db.Text
+  isAutoDetected Boolean @default(false)
+
+  @@map("timesheet_event")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: PAYROLL & PAY PERIODS
+// ----------------------------------------------------------------------
+
+model PayPeriod {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  periodStart DateTime        @db.Date
+  periodEnd   DateTime        @db.Date
+  payDate     DateTime?       @db.Date
+  frequency   PayFrequency    @default(FORTNIGHTLY)
+  status      PayPeriodStatus @default(DRAFT)
+
+  // Earnings breakdown
+  basePay        Float @default(0)
+  loadAllowance  Float @default(0)
+  distanceAllow  Float @default(0)
+  otherAllowance Float @default(0)
+  bonuses        Float @default(0)
+  grossEarnings  Float @default(0)
+
+  // Deductions
+  paygTax         Float @default(0)
+  superAmount     Float @default(0) // 11% superannuation
+  unionFees       Float @default(0)
+  otherDeductions Float @default(0)
+  totalDeductions Float @default(0)
+
+  netPay Float @default(0)
+
+  pdfUrl String? // Payslip PDF download URL
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pay_period")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: TRAILER / EQUIPMENT SWAP
+// ----------------------------------------------------------------------
+
+model EquipmentSwap {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  prevTrailerId String?
+  prevTrailer   Vehicle? @relation("PrevTrailerSwap", fields: [prevTrailerId], references: [id])
+
+  newTrailerId String?
+  newTrailer   Vehicle? @relation("NewTrailerSwap", fields: [newTrailerId], references: [id])
+
+  swapType String  @default("Trailer Swap") // e.g., Trailer Swap, Truck Swap
+  reason   String? // e.g., Routine Change, Defect
+
+  approvalPolicy String @default("DIRECT") // DIRECT | APPROVAL_REQUIRED
+  approvalStatus String @default("Approved") // Approved, Pending, Rejected
+
+  equipmentCheck Boolean @default(false)
+
+  gpsLat       Float?
+  gpsLng       Float?
+  locationName String? // e.g., "Yass Yard NSW"
+
+  notes String? @db.Text
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  swappedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@map("equipment_swap")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: VIN SCAN EVENTS (PICKUP & DELIVERY)
+// ----------------------------------------------------------------------
+
+model VinScanEvent {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id])
+
+  loadItemId String?
+  loadItem   LoadItem? @relation(fields: [loadItemId], references: [id])
+
+  scannedVin String // The VIN that was physically scanned
+  result     VinScanResult // PICKED_UP | DELIVERED | WRONG_VEHICLE
+
+  stopType  String // "PICKUP" | "DELIVERY"
+  stopIndex Int? // Which stop number this scan was at
+
+  gpsLat Float?
+  gpsLng Float?
+
+  timestamp DateTime @default(now())
+
+  @@map("vin_scan_event")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: PROOF OF DELIVERY (POD)
+// ----------------------------------------------------------------------
+
+model DeliveryPOD {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id])
+
+  loadItemId String?
+  loadItem   LoadItem? @relation(fields: [loadItemId], references: [id])
+
+  stopIndex Int?
+
+  isAfterHours Boolean @default(false) // After-hours: no signature required
+
+  signatureUrl String? // Customer digital signature (Base64 / S3 URL)
+  signeeName   String? // Name of the person who signed
+
+  deliveryNotes String? @db.Text
+
+  gpsLat Float?
+  gpsLng Float?
+
+  deliveredAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@map("delivery_p_o_d")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: OFFLINE SYNC QUEUE
+// ----------------------------------------------------------------------
+
+model OfflineSyncItem {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  type   OfflineSyncType
+  status OfflineSyncStatus @default(PENDING)
+
+  referenceId String? // ID of the linked record
+  refCode     String? // e.g., "PSC-290525-001"
+  description String? // e.g., "Pre-Start Check", "Load Photos (3)"
+
+  fileSizeKb     Int?
+  uploadProgress Int  @default(0) // 0-100 percent
+
+  errorMessage String? @db.Text
+  retryCount   Int     @default(0)
+
+  capturedAt DateTime  @default(now())
+  syncedAt   DateTime?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("offline_sync_item")
+}
+
+model LoadLane {
+  id          String         @id @default(uuid())
+  warehouseId String
+  warehouse   Warehouse      @relation(fields: [warehouseId], references: [id])
+  name        String
+  status      String         @default("ACTIVE")
+  loadItems   LoadItem[]
+  movements   ItemMovement[]
+  loads       Load[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("load_lane")
+}
+
+model StagingArea {
+  id              String           @id @default(uuid())
+  warehouseId     String
+  warehouse       Warehouse        @relation(fields: [warehouseId], references: [id])
+  name            String
+  status          String           @default("ACTIVE")
+  loadItems       LoadItem[]
+  movements       ItemMovement[]
+  loads           Load[]
+  inboundReceipts InboundReceipt[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@map("staging_area")
+}
+
+model NetworkedPrinter {
+  id          String    @id @default(uuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  name        String
+  ipAddress   String
+  status      String    @default("ONLINE")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("networked_printer")
+}
+
+model WarehouseLabelPrint {
+  id          String    @id @default(uuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  barcode     String    @unique
+  status      String    @default("PENDING")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("warehouse_label_print")
+}
+
+model PrintSpoolerJob {
+  id          String    @id @default(uuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  status      String    @default("PENDING")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("print_spooler_job")
+}
+
+model Document {
+  id         String    @id @default(uuid())
+  type       String
+  fileUrl    String    @db.LongText
+  expiryDate DateTime?
+
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id])
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id])
+
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("document")
+}
+
+model PaymentGatewayConfig {
+  id                   String   @id @default(uuid())
+  stripeEnabled        Boolean  @default(false)
+  stripePublishableKey String?
+  stripeSecretKey      String?
+  paypalEnabled        Boolean  @default(false)
+  achEnabled           Boolean  @default(false)
+  achRoutingNumber     String?
+  achAccountNumber     String?
+  wireEnabled          Boolean  @default(false)
+  wireBankName         String?
+  wireSwiftCode        String?
+  wireAccountNumber    String?
+  manualEnabled        Boolean  @default(false)
+  manualInstructions   String?  @db.Text
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("payment_gateway_config")
+}
+
+// ----------------------------------------------------------------------
+// PRICING & RATE MATRIX MODELS
+// ----------------------------------------------------------------------
+
+model LanePricingRule {
+  id               String   @id @default(uuid())
+  origin           String // e.g., "Sydney, NSW"
+  destination      String // e.g., "Melbourne, VIC"
+  minCharge        Float    @default(400) // $AUD
+  baseLinehaulRate Float    @default(1500) // $AUD
+  perKmRate        Float    @default(2.50) // $AUD per km
+  fuelSurcharge    Float    @default(14.5) // %
+  status           String   @default("Active") // Active | Inactive
+  effectiveDate    DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("lane_pricing_rule")
+}
+
+model VehicleTypeRate {
+  id          String  @id @default(uuid())
+  vehicleType String // e.g., "B-Double Combination"
+  capacity    String? // e.g., "34 Pallets / 44T"
+  hourlyRate  Float   @default(150) // $AUD/hr
+  perKmRate   Float   @default(2.50) // $AUD/km
+  minHours    Int     @default(4) // Minimum billable hours
+  status      String  @default("Active") // Active | Inactive
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("vehicle_type_rate")
+}
+
+model FuelSurchargeLog {
+  id            String   @id @default(uuid())
+  rate          Float // e.g., 14.50 (%)
+  effectiveDate DateTime @default(now())
+  setBy         String? // name of operator
+  notes         String?  @db.Text
+  isActive      Boolean  @default(false)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@map("fuel_surcharge_log")
+}
+
+model WorkflowRule {
+  id           String  @id @default(uuid())
+  name         String
+  description  String? @db.Text
+  category     String  @default("Invoice Automation")
+  trigger      String?
+  action       String?
+  status       String  @default("Active")
+  lastExecuted String? @default("Never")
+  executions   Int     @default(0)
+  createdBy    String? @default("Sarah Mitchell")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("workflow_rule")
+}
+
+model AiModelRegistry {
+  id          String  @id @default(uuid())
+  name        String
+  provider    String  @default("OpenAI")
+  version     String  @default("v1.0")
+  latencySla  String? @default("120ms")
+  costRate    String? @default("$0.002 / 1k tokens")
+  status      String  @default("Active")
+  lastUpdated String? @default("Today")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_model_registry")
+}
+
+model NotificationTemplate {
+  id       String  @id @default(uuid())
+  title    String
+  channel  String  @default("Email")
+  body     String? @db.Text
+  category String? @default("General")
+  status   String  @default("Active")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notification_template")
+}
+
+model NotificationRule {
+  id        String  @id @default(uuid())
+  name      String
+  trigger   String
+  channels  String  @default("SMS + Email")
+  recipient String? @default("Customer & Accounts")
+  priority  String  @default("High")
+  status    String  @default("Enabled")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notification_rule")
+}
+
+model RecipientGroup {
+  id          String  @id @default(uuid())
+  name        String
+  count       String? @default("0 members")
+  description String? @db.Text
+  status      String  @default("Active")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("recipient_group")
+}
+
+model ImpersonationSession {
+  id              String    @id @default(uuid())
+  actorId         String
+  targetUserId    String
+  targetCompanyId String
+  reason          String    @db.Text
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  ipAddress       String?
+  userAgent       String?   @db.Text
+
+  @@map("impersonation_session")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: NOTIFICATIONS
+// ----------------------------------------------------------------------
+
+model Notification {
+  id       String    @id @default(uuid())
+  driverId String
+  driver   Driver    @relation(fields: [driverId], references: [id])
+  type     String // e.g., 'DISPATCH', 'ALERT', 'SYSTEM'
+  title    String
+  message  String
+  isRead   Boolean   @default(false)
+  readAt   DateTime?
+  priority String?   @default("NORMAL")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([driverId, isRead])
+  @@map("notification")
+}
+
+// ----------------------------------------------------------------------
+// DRIVER PORTAL: INCIDENT & EMERGENCY SOS REPORTING
+// ----------------------------------------------------------------------
+
+model DriverIncident {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  incidentType String  @default("INCIDENT") // "INCIDENT" | "SOS"
+  category     String // e.g. "Highway Road Accident", "Cargo Damage", "Vehicle Breakdown"
+  description  String  @db.Text
+  photoUrl     String?
+  status       String  @default("UNDER_REVIEW") // UNDER_REVIEW, INVESTIGATING, RESOLVED, CLOSED
+
+  gpsLat Float?
+  gpsLng Float?
+
+  isSos      Boolean @default(false)
+  shareGps   Boolean @default(true)
+  autoNotify Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("driver_incident")
+}
+
+model RegionalTerminal {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  code      String?
+  city      String?
+  state     String?
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("regional_terminal")
+}
+
+model PlatformSetting {
+  id                     String   @id @default(uuid())
+  defaultCurrency        String   @default("USD")
+  defaultLanguage        String   @default("en")
+  defaultTrialDays       Int      @default(14)
+  basePricePerCompany    Float    @default(299.00)
+  forceMfaAdmins         Boolean  @default(true)
+  forceMfaTenants        Boolean  @default(false)
+  passwordComplexity     String   @default("MEDIUM")
+  minPasswordLength      Int      @default(8)
+  maxLoginAttempts       Int      @default(5)
+  lockoutDurationMinutes Int      @default(15)
+  stripePublishableKey   String?  @db.Text
+  stripeWebhookSecret    String?  @db.Text
+  googleMapsApiKey       String?  @db.Text
+  emailService           String   @default("sendgrid")
+  emailApiKey            String?  @db.Text
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@map("platform_setting")
+}
+
+
+model CompanyStorageAudit {
+  id         String   @id @default(uuid())
+  companyId  String   @unique
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  usedBytes  BigInt   @default(0)
+  limitBytes BigInt
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([updatedAt])
+  @@map("company_storage_audit")
+}
