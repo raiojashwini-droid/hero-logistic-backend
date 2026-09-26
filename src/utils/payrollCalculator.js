@@ -159,11 +159,15 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     }
     if (totalLoadAmount > 0) {
       loadAllowance = totalLoadAmount;
+      if (hoursWorked === 0) basePay = 0;
     }
   }
 
   // Compute Totals: Gross Earnings & Net Pay
-  let grossEarnings = Math.round((basePay + overtimePay + (normalizedType.includes('load') ? 0 : loadAllowance) + distanceAllow + otherAllowance + bonuses) * 100) / 100;
+  if (loadAllowance > 0 && hoursWorked === 0) {
+    basePay = 0;
+  }
+  let grossEarnings = Math.round((basePay + overtimePay + loadAllowance + distanceAllow + otherAllowance + bonuses) * 100) / 100;
 
   // Fallback: If gross earnings evaluates to 0
   if (grossEarnings === 0) {
