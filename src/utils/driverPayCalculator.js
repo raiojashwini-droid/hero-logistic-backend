@@ -195,7 +195,49 @@ function calculatePerLoadDriverPay({ load = null, driverRate = 0, ruleRate = 0, 
     }
   }
 
-  // Priority 3: Driver loadPaySchedule JSON options
+  // Priority 3: Company-wide Load Pay Schedules (managed in Company Admin -> Payroll -> Load Pay Schedules e.g. Sydney -> Melbourne = $500)
+  if (effectiveRate <= 0 && load) {
+    try {
+      const companyCtrl = require('../controllers/CompanyAdminPortalController');
+      const store = companyCtrl?.driverLoadScheduleStore || {};
+      const companyId = driver?.companyId || load?.companyId || 'default';
+      const companySchedules = store[companyId] || store['default'] || [
+        { origin: 'Sydney', destination: 'Melbourne', rate: 500.00 },
+        { origin: 'Melbourne', destination: 'Adelaide', rate: 1000.00 },
+        { origin: 'Sydney', destination: 'Brisbane', rate: 650.00 },
+        { origin: 'Brisbane', destination: 'Cairns', rate: 1200.00 }
+      ];
+
+      if (Array.isArray(companySchedules) && companySchedules.length > 0) {
+        let pAddr = String(load.origin || load.pickupLocation || load.from || '').trim().toLowerCase();
+        let dAddr = String(load.destination || load.deliveryLocation || load.to || '').trim().toLowerCase();
+
+        if (Array.isArray(load.stops) && load.stops.length > 0) {
+          const pickupStop = load.stops.find(s => s.type === 'PICKUP') || load.stops[0];
+          const dropStop = load.stops.find(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || load.stops[load.stops.length - 1];
+          if (pickupStop?.address) pAddr = pickupStop.address.trim().toLowerCase();
+          if (dropStop?.address) dAddr = dropStop.address.trim().toLowerCase();
+        }
+
+        for (const cSched of companySchedules) {
+          if (cSched.status && cSched.status !== 'Active') continue;
+          const orig = (cSched.origin || '').trim().toLowerCase();
+          const dest = (cSched.destination || '').trim().toLowerCase();
+
+          if (orig && dest && pAddr && dAddr) {
+            const pMatch = pAddr.includes(orig) || orig.includes(pAddr.split(',')[0]);
+            const dMatch = dAddr.includes(dest) || dest.includes(dAddr.split(',')[0]);
+            if (pMatch && dMatch) {
+              effectiveRate = parseFloat(cSched.rate || cSched.amount || 0);
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Priority 4: Driver loadPaySchedule JSON options
   const scheduleSource = driver?.loadPaySchedule || load?.driverLoadPaySchedule;
   if (effectiveRate <= 0 && scheduleSource) {
     try {

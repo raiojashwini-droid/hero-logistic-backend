@@ -365,12 +365,29 @@ exports.updateLoad = async (req, res, next) => {
     if (!payload.trailerId) delete payload.trailerId;
     if (!payload.branchId) delete payload.branchId;
 
-    // If driverPay changed, update the notes to reflect new DRIVER_PAY value
-    if (newDriverPay !== null && newDriverPay > 0) {
+    // Auto-calculate or update DRIVER_PAY tag in notes
+    const effectiveDriverId = payload.driverId || targetLoad.driverId;
+    let computedDriverPay = newDriverPay;
+
+    if (!computedDriverPay && effectiveDriverId) {
+      try {
+        const { calculateDriverPayForLoad } = require('../utils/driverPayCalculator');
+        const assignedDriver = await prisma.driver.findUnique({ where: { id: effectiveDriverId } });
+        if (assignedDriver) {
+          const loadForCalc = { ...targetLoad, ...payload, stops: stops || targetLoad.stops };
+          const calc = calculateDriverPayForLoad({ driver: assignedDriver, load: loadForCalc });
+          if (calc && calc.grossPay > 0) {
+            computedDriverPay = calc.grossPay;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (computedDriverPay !== null && computedDriverPay > 0) {
       const baseNotes = (payload.notes || targetLoad.notes || '')
         .replace(/\[DRIVER_PAY:[^\]]+\]/g, '')
         .trim();
-      payload.notes = `${baseNotes} [DRIVER_PAY:${newDriverPay}]`.trim();
+      payload.notes = `${baseNotes} [DRIVER_PAY:${computedDriverPay}]`.trim();
     }
 
     // Handle nested relation updates for stops
@@ -434,7 +451,6 @@ exports.updateLoad = async (req, res, next) => {
 
     // P1: If driverPay changed and load is ALREADY delivered, recalculate driver PayPeriod
     const isAlreadyDelivered = ['DELIVERED', 'COMPLETED', 'CLOSED'].includes(targetLoad.status);
-    const effectiveDriverId = (payload.driverId || targetLoad.driverId);
     if (newDriverPay !== null && newDriverPay > 0 && isAlreadyDelivered && effectiveDriverId) {
       try {
         const payPeriod = await prisma.payPeriod.findFirst({
@@ -2245,7 +2261,7 @@ exports.getPayroll = async (req, res, next) => {
     ]);
 
     // Aggregate KPI stats
-    const totalPayrollMTD = payPeriods
+    let totalPayrollMTD = payPeriods
       .filter(p => {
         const d = new Date(p.periodEnd);
         const now = new Date();
@@ -2253,8 +2269,23 @@ exports.getPayroll = async (req, res, next) => {
       })
       .reduce((sum, p) => sum + (p.grossEarnings || 0), 0);
 
-    const pendingRuns = payPeriods.filter(p => p.status === 'DRAFT' || p.status === 'PENDING');
-    const pendingAmount = pendingRuns.reduce((sum, p) => sum + (p.grossEarnings || 0), 0);
+    let pendingRuns = payPeriods.filter(p => p.status === 'DRAFT' || p.status === 'PENDING');
+    let pendingAmount = pendingRuns.reduce((sum, p) => sum + (p.grossEarnings || 0), 0);
+
+    if (totalPayrollMTD === 0 && pendingAmount === 0 && driverCount > 0) {
+      const drivers = await prisma.driver.findMany({ where: companyId ? { companyId } : {} });
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const periodEnd = new Date();
+
+      for (const d of drivers) {
+        const calc = await calculateDriverPay({ driver: d, startDate: periodStart, endDate: periodEnd, companyId });
+        if (calc) {
+          totalPayrollMTD += (calc.grossEarnings || 0);
+          pendingAmount += (calc.grossEarnings || 0);
+        }
+      }
+    }
 
     const approvedTimesheets = timesheets.filter(t => t.status === 'APPROVED').length;
     const allTimesheets = timesheets.length;
@@ -2385,7 +2416,7 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
       };
     }
 
-    const payPeriods = await prisma.payPeriod.findMany({
+    let payPeriods = await prisma.payPeriod.findMany({
       where,
       include: {
         driver: {
@@ -2398,6 +2429,48 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 50
     });
+
+    if (payPeriods.length === 0) {
+      const drivers = await prisma.driver.findMany({
+        where: companyId ? { companyId } : {},
+        include: { branch: { select: { name: true } } }
+      });
+      const liveBreakdowns = [];
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const periodEnd = new Date();
+
+      for (const d of drivers) {
+        const calc = await calculateDriverPay({ driver: d, startDate: periodStart, endDate: periodEnd, companyId });
+        if (calc) {
+          liveBreakdowns.push({
+            id: `live-${d.id}`,
+            driverId: d.id,
+            driver: {
+              id: d.id,
+              firstName: d.firstName,
+              lastName: d.lastName,
+              driverCode: d.driverCode,
+              licenseClass: d.licenseClass || 'All Classes',
+              branch: d.branch
+            },
+            periodStart,
+            periodEnd,
+            basePay: calc.basePay || 0,
+            loadAllowance: calc.loadAllowance || 0,
+            distanceAllow: calc.distanceAllow || 0,
+            otherAllowance: calc.otherAllowance || 0,
+            bonuses: calc.bonuses || 0,
+            grossEarnings: calc.grossEarnings || 0,
+            paygTax: calc.paygTax || 0,
+            superAmount: calc.superAmount || 0,
+            netPay: calc.netPay || 0,
+            status: 'DRAFT'
+          });
+        }
+      }
+      if (liveBreakdowns.length > 0) payPeriods = liveBreakdowns;
+    }
 
     return sendSuccess(res, payPeriods);
   } catch (error) { next(error); }

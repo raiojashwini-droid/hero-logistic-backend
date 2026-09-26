@@ -515,6 +515,7 @@ exports.getDashboard = async (req, res, next) => {
           // 3. Match against Company-wide Load Pay Schedules (managed in Company → Payroll)
           if (loadAmt <= 0) {
             try {
+              const companyId = driver?.companyId || req.tenantId || 'default';
               const store = companyCtrl.driverLoadScheduleStore || {};
               const companySchedules = store[companyId] || store['default'] || [];
               if (Array.isArray(companySchedules) && companySchedules.length > 0) {
@@ -3840,31 +3841,6 @@ exports.markAllNotificationsRead = async (req, res, next) => {
 
 
 exports.getPayroll = exports.getPayrollData;
-exports.getPickupLoad = async (req, res, next) => {
-  try {
-    const driver = await resolveDriver(req);
-    const loads = await prisma.load.findMany({
-      where: driver ? { driverId: driver.id } : {},
-      include: { items: true, stops: true },
-      orderBy: { createdAt: 'desc' }
-    }).catch(() => []);
 
-    const activeLoad = loads[0];
-    return sendSuccess(res, { load: activeLoad, items: activeLoad?.items || [] });
-  } catch (error) { next(error); }
-};
-
-exports.updatePickupItemStatus = async (req, res, next) => {
-  try {
-    const { itemId, status } = req.body;
-    if (prisma.loadItem && itemId) {
-      await prisma.loadItem.update({
-        where: { id: itemId },
-        data: { status: status || 'PICKED_UP' }
-      }).catch(() => null);
-    }
-    return sendSuccess(res, { success: true });
-  } catch (error) { next(error); }
-};
 
 

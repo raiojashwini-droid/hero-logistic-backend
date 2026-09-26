@@ -101,8 +101,6 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
 
   let overtimePay = 0;
   let paygTax = 0;
-  let superAmount = 0;
-
   if (normalizedType.includes('load')) {
     // === PER LOAD ===
     let targetLoads = loads.filter(l => ['DELIVERED', 'COMPLETED', 'CLOSED'].includes(l.status));
@@ -112,27 +110,8 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     
     let totalLoadAmount = 0;
     targetLoads.forEach(ld => {
-      let loadAmt = 0;
-      if (ld.notes && typeof ld.notes === 'string' && ld.notes.includes('[DRIVER_PAY:')) {
-        const m = ld.notes.match(/\[DRIVER_PAY:([0-9.]+)/);
-        if (m && m[1]) loadAmt = parseFloat(m[1]);
-      }
-      if (loadAmt <= 0 && (ld.destination || ld.deliveryLocation)) {
-        const dKey = String(ld.destination || ld.deliveryLocation || '').trim().toLowerCase();
-        for (const [k, v] of Object.entries(scheduleRates)) {
-          if (dKey.includes(k) || k.includes(dKey)) {
-            loadAmt = v;
-            break;
-          }
-        }
-      }
-      if (loadAmt <= 0 && defaultScheduleRate > 0) {
-        loadAmt = defaultScheduleRate;
-      }
-      if (loadAmt <= 0 && rawRate > 0) {
-        loadAmt = rawRate;
-      }
-      totalLoadAmount += loadAmt;
+      const calcRes = calculatePerLoadDriverPay({ load: ld, driverRate: rawRate, driver });
+      totalLoadAmount += (calcRes.grossPay || 0);
     });
 
     if (totalLoadAmount <= 0 && defaultScheduleRate > 0) {
