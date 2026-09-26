@@ -2365,8 +2365,17 @@ exports.getPayroll = async (req, res, next) => {
       prisma.driver.count({ where: companyId ? { OR: [{ companyId }, { company: { id: companyId } }] } : {} })
     ]);
 
+    const driverWhereScope = companyId ? {
+      OR: [
+        { companyId },
+        { company: { id: companyId } },
+        { companyId: null },
+        { companyId: 'default' }
+      ]
+    } : {};
+
     const drivers = await prisma.driver.findMany({
-      where: companyId ? { OR: [{ companyId }, { company: { id: companyId } }] } : {},
+      where: driverWhereScope,
       include: { branch: { select: { name: true } } }
     });
 
@@ -2379,7 +2388,7 @@ exports.getPayroll = async (req, res, next) => {
       const calc = await calculateDriverPay({ driver: d, startDate: periodStart, endDate: periodEnd, companyId });
       let gross = calc ? (calc.grossEarnings || calc.loadAllowance || calc.basePay || 0) : 0;
       if (gross === 0) {
-        gross = parseFloat(d.payRate) || 500.00;
+        gross = parseFloat(d.payRate) || 300.00;
       }
 
       let existing = payPeriods.find(p => p.driverId === d.id);
@@ -2616,8 +2625,17 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
       take: 50
     });
 
+    const driverWhereScope = companyId ? {
+      OR: [
+        { companyId },
+        { company: { id: companyId } },
+        { companyId: null },
+        { companyId: 'default' }
+      ]
+    } : {};
+
     const drivers = await prisma.driver.findMany({
-      where: companyId ? { OR: [{ companyId }, { company: { id: companyId } }] } : {},
+      where: driverWhereScope,
       include: { branch: { select: { name: true } } }
     });
 
