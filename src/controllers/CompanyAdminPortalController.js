@@ -2447,13 +2447,27 @@ exports.getPayroll = async (req, res, next) => {
       payPeriods = liveRuns;
     }
 
-    let totalPayrollMTD = payPeriods.reduce((sum, p) => sum + (parseFloat(p.grossEarnings) || parseFloat(p.netPay) || 0), 0);
+    const toNumber = (val) => {
+      if (val === null || val === undefined) return 0;
+      if (typeof val === 'number') return val;
+      if (typeof val === 'string') return parseFloat(val) || 0;
+      if (typeof val === 'object' && val !== null) {
+        return parseFloat(val.toString()) || Number(val) || 0;
+      }
+      return parseFloat(val) || 0;
+    };
+
+    let totalPayrollMTD = payPeriods.reduce((sum, p) => sum + (toNumber(p.grossEarnings) || toNumber(p.netPay) || 0), 0);
     let pendingRuns = payPeriods.filter(p => p.status === 'DRAFT' || p.status === 'PENDING' || p.status === 'PROCESSING');
-    let pendingAmount = pendingRuns.reduce((sum, p) => sum + (parseFloat(p.grossEarnings) || parseFloat(p.netPay) || 0), 0);
+    let pendingAmount = pendingRuns.reduce((sum, p) => sum + (toNumber(p.grossEarnings) || toNumber(p.netPay) || 0), 0);
+
+    if (totalPayrollMTD === 0 && pendingAmount > 0) {
+      totalPayrollMTD = pendingAmount;
+    }
 
     const approvedTimesheets = timesheets.filter(t => t.status === 'APPROVED').length;
     const allTimesheets = timesheets.length;
-    const timesheetApprovalRate = allTimesheets > 0 ? Math.round((approvedTimesheets / allTimesheets) * 100) : 0;
+    const timesheetApprovalRate = allTimesheets > 0 ? Math.round((approvedTimesheets / allTimesheets) * 100) : 100;
 
     return sendSuccess(res, {
       stats: {
