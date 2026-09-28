@@ -1,21 +1,22 @@
 const prisma = require('../utils/prismaClient');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const { HTTP_STATUS, ERROR_CODES } = require('../config/constants');
+const { resolveCompanyId } = require('../middlewares/tenantResolver');
 
 exports.getInventory = async (req, res, next) => {
   try {
-    const tenantId = req.user?.companyId || req.user?.tenantId || req.tenantId;
-    if (!tenantId && req.user?.role !== 'SUPER_ADMIN') {
+    const tenantId = resolveCompanyId(req);
+    if (!tenantId) {
       return sendSuccess(res, []);
     }
 
-    const tenantFilter = tenantId ? {
+    const tenantFilter = {
       OR: [
         { warehouse: { branch: { companyId: tenantId } } },
         { load: { companyId: tenantId } },
         { customer: { companyId: tenantId } }
       ]
-    } : {};
+    };
 
     let inventory = [];
     try {
@@ -25,7 +26,6 @@ exports.getInventory = async (req, res, next) => {
             tenantFilter,
             {
               OR: [
-                { warehouseId: { not: null } },
                 { sku: { not: null } },
                 { stockRef: { not: null } }
               ]
