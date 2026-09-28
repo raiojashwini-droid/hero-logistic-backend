@@ -870,7 +870,10 @@ exports.getReceiveInboundPortal = async (req, res, next) => {
 
 exports.getInboundFormOptions = async (req, res, next) => {
   try {
-    const tenantId = req.tenantId;
+    const tenantId = resolveCompanyId(req);
+    if (!tenantId && req.user?.role !== 'SUPER_ADMIN') {
+      return sendSuccess(res, { suppliers: [], drivers: [], vehicles: [], warehouses: [] });
+    }
 
     const [suppliers, drivers, vehicles, warehouses] = await Promise.all([
       prisma.customer.findMany({
@@ -3433,9 +3436,12 @@ exports.completeTask = async (req, res, next) => {
 
 // --- Additional Warehouse Portal Handlers from Master ---
 
-exports.getInboundFormOptions = async (req, res, next) => {
+exports.getInboundFormOptionsMaster = async (req, res, next) => {
   try {
-    const tenantId = req.tenantId;
+    const tenantId = resolveCompanyId(req);
+    if (!tenantId && req.user?.role !== 'SUPER_ADMIN') {
+      return sendSuccess(res, { suppliers: [], drivers: [], vehicles: [], warehouses: [] });
+    }
 
     const [suppliers, drivers, vehicles, warehouses] = await Promise.all([
       prisma.customer.findMany({

@@ -1189,9 +1189,9 @@ exports.pushTelemetry = async (req, res, next) => {
 // ----------------------------------------------------------------------
 exports.getDrivers = async (req, res, next) => {
   try {
-    const companyId = await resolveCompanyId(req);
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
-    if (companyId) where.companyId = companyId;
+    const tenantWhere = getTenantWhere(req);
+    Object.assign(where, tenantWhere);
 
     const [data, total] = await Promise.all([
       prisma.driver.findMany({ where, skip, take, orderBy, include: { branch: true, manager: true, currentVehicle: true } }),
@@ -1203,28 +1203,11 @@ exports.getDrivers = async (req, res, next) => {
 
 exports.createDriver = async (req, res, next) => {
   try {
-    const companyId = await resolveCompanyId(req);
+    const companyId = resolveCompanyId(req);
     const payload = { ...req.body };
-    let effectiveCompanyId = companyId || payload.companyId;
-    if (!effectiveCompanyId) {
-      let defaultComp = await prisma.company.findFirst().catch(() => null);
-      if (!defaultComp) {
-        defaultComp = await prisma.company.create({
-          data: {
-            name: 'Hero Logistics Pty Ltd',
-            tenantId: 'HERO-DEMO-01'
-          }
-        }).catch(() => null);
-      }
-      if (defaultComp) {
-        effectiveCompanyId = defaultComp.id;
-        if (req.user?.id && !req.user.companyId) {
-          await prisma.user.update({
-            where: { id: req.user.id },
-            data: { companyId: defaultComp.id }
-          }).catch(() => null);
-        }
-      }
+    let effectiveCompanyId = companyId || (req.user?.role === 'SUPER_ADMIN' ? payload.companyId : null);
+    if (!effectiveCompanyId && req.user?.role !== 'SUPER_ADMIN') {
+      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required to create driver' }, HTTP_STATUS.FORBIDDEN);
     }
 
     let validStatus = 'AVAILABLE';
@@ -1312,9 +1295,9 @@ exports.createDriver = async (req, res, next) => {
 // ----------------------------------------------------------------------
 exports.getVehicles = async (req, res, next) => {
   try {
-    const companyId = await resolveCompanyId(req);
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
-    if (companyId) where.companyId = companyId;
+    const tenantWhere = getTenantWhere(req);
+    Object.assign(where, tenantWhere);
 
     const [data, total] = await Promise.all([
       prisma.vehicle.findMany({ where, skip, take, orderBy, include: { currentDriver: true, company: true } }),
@@ -1326,9 +1309,12 @@ exports.getVehicles = async (req, res, next) => {
 
 exports.createVehicle = async (req, res, next) => {
   try {
-    const companyId = await resolveCompanyId(req);
+    const companyId = resolveCompanyId(req);
     const rawPayload = { ...req.body };
-    const effectiveCompanyId = companyId || rawPayload.companyId;
+    const effectiveCompanyId = companyId || (req.user?.role === 'SUPER_ADMIN' ? rawPayload.companyId : null);
+    if (!effectiveCompanyId && req.user?.role !== 'SUPER_ADMIN') {
+      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required to create vehicle' }, HTTP_STATUS.FORBIDDEN);
+    }
 
     let validCategory = 'TRUCK';
     if (rawPayload.category) {
@@ -3554,7 +3540,25 @@ exports.getReports = async (req, res, next) => {
 // ----------------------------------------------------------------------
 exports.getMessages = async (req, res, next) => {
   try {
-    const companyId = await resolveCompanyId(req);
+    const companyId = resolveCompanyId(req);
+    if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
+      return sendSuccess(res, {
+        users: [],
+        customers: [],
+        conversations: [],
+        templates: [],
+        rules: [],
+        stats: {
+          unreadMessages: 0,
+          totalConversations: 0,
+          pendingReplies: 0,
+          announcements: 0,
+          sentThisMonth: 0,
+          deliverySuccessRate: '100%'
+        }
+      });
+    }
+
     const whereScope = companyId ? { companyId } : {};
 
     const [usersRes, customersRes, conversationsRes, templatesRes, rulesRes] = await Promise.allSettled([
@@ -3585,12 +3589,12 @@ exports.getMessages = async (req, res, next) => {
       templates: templateList,
       rules: ruleList,
       stats: {
-        unreadMessages: 18,
-        totalConversations: convList.length > 0 ? convList.length : 156,
-        pendingReplies: 24,
-        announcements: 5,
-        sentThisMonth: 372,
-        deliverySuccessRate: '97.8%'
+        unreadMessages: 0,
+        totalConversations: convList.length,
+        pendingReplies: 0,
+        announcements: 0,
+        sentThisMonth: 0,
+        deliverySuccessRate: '100%'
       }
     });
   } catch (error) { next(error); }
@@ -3843,70 +3847,7 @@ exports.getReports = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
-// ----------------------------------------------------------------------
-// 14. MESSAGES MENU
-// ----------------------------------------------------------------------
-exports.getMessages = async (req, res, next) => {
-  try {
-    const companyId = await resolveCompanyId(req);
-    const whereScope = companyId ? { companyId } : {};
-
-    const [conversations, users, customers, templates] = await Promise.all([
-      prisma.conversation.findMany({
-        where: whereScope,
-        include: {
-          participants: { include: { user: { select: { id: true, name: true, email: true, role: true } } } },
-          messages: { take: 20, orderBy: { createdAt: 'asc' }, include: { sender: { select: { id: true, name: true, role: true } } } }
-        },
-        orderBy: { updatedAt: 'desc' }
-      }),
-      prisma.user.findMany({
-        where: companyId ? { OR: [{ companyId }, { companyId: null }] } : {},
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          status: true,
-          phone: true,
-          updatedAt: true
-        },
-        orderBy: { name: 'asc' }
-      }),
-      prisma.customer.findMany({
-        where: whereScope,
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          status: true,
-          updatedAt: true
-        },
-        orderBy: { name: 'asc' }
-      }),
-      prisma.notificationTemplate.findMany({
-        orderBy: { createdAt: 'desc' }
-      })
-    ]);
-
-    const totalConversations = conversations.length;
-
-    return sendSuccess(res, {
-      conversations,
-      users,
-      customers,
-      templates,
-      metrics: {
-        unreadMessages: 0,
-        totalConversations,
-        pendingReplies: 0,
-        announcements: 0,
-        sentThisMonth: 0
-      }
-    });
-  } catch (error) { next(error); }
-};
+// Duplicate getMessages removed — primary implementation is defined above.
 
 // ----------------------------------------------------------------------
 // 15. SUPPORT & KNOWLEDGE BASE MENU

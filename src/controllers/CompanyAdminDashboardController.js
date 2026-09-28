@@ -201,7 +201,9 @@ exports.getDashboardMetrics = async (req, res, next) => {
     }));
 
     // 8. Unread Messages / Alerts
-    const messageScope = whereScope.companyId ? { conversation: { companyId: whereScope.companyId } } : {};
+    const messageScope = whereScope.companyId
+      ? { conversation: { companyId: whereScope.companyId } }
+      : (req.user?.role === 'SUPER_ADMIN' ? {} : { conversation: { companyId: 'IMPOSSIBLE_TENANT_ID_NO_ACCESS' } });
     const unreadMessagesRaw = await prisma.message.findMany({
       where: messageScope,
       take: 3,
