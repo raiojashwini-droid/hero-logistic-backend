@@ -25,9 +25,21 @@ exports.getInventory = async (req, res, next) => {
           AND: [
             tenantFilter,
             {
-              OR: [
-                { sku: { not: null } },
-                { stockRef: { not: null } }
+              sku: { not: null }
+            },
+            {
+              NOT: [
+                { sku: '' },
+                { sku: 'N/A' }
+              ]
+            },
+            {
+              description: { not: null }
+            },
+            {
+              NOT: [
+                { description: '' },
+                { description: 'N/A' }
               ]
             }
           ]
