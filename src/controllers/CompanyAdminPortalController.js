@@ -2462,12 +2462,12 @@ exports.getPayroll = async (req, res, next) => {
 
     const approvedTimesheets = timesheets.filter(t => t.status === 'APPROVED').length;
     const allTimesheets = timesheets.length;
-    const timesheetApprovalRate = allTimesheets > 0 ? Math.round((approvedTimesheets / allTimesheets) * 100) : 100;
+    const timesheetApprovalRate = allTimesheets > 0 ? Math.round((approvedTimesheets / allTimesheets) * 100) : 0;
 
     return sendSuccess(res, {
       stats: {
         totalPayrollMTD,
-        activeDriversPaid: driverCount || payPeriods.length || 1,
+        activeDriversPaid: driverCount || payPeriods.length || 0,
         pendingPayRun: pendingAmount,
         stpStatus: 'Compliant',
         timesheetApprovalRate,
@@ -4279,34 +4279,8 @@ exports.getSubscriptionBilling = async (req, res, next) => {
 
     const apiLimit = plan?.apiCallsLimit || 100000;
 
-    // Auto-create initial billing record if table is currently empty
+    // Auto-create initial billing record removed to prevent dummy data from appearing in Finance dashboard.
     let billingRecordsList = company.billingRecords || [];
-    if (billingRecordsList.length === 0) {
-      const invCount = await prisma.billingRecord.count({ where: { companyId } });
-      const invoiceNumber = `INV-${now.getFullYear()}-${String(1001 + invCount).padStart(4, '0')}`;
-      const planName = plan?.name || 'Hero Pro';
-      const planCost = plan?.monthlyPrice || sub?.amount || 499;
-
-      const newRecord = await prisma.billingRecord.create({
-        data: {
-          invoiceNumber,
-          companyId,
-          amount: planCost,
-          taxAmount: +(planCost * 0.10).toFixed(2),
-          status: 'PAID',
-          paymentMethod: company.cardBrand ? `${company.cardBrand} •••• ${company.cardLast4 || '4242'}` : 'Visa •••• 4242',
-          planTierSnapshot: planName,
-          periodStart: sub?.startDate || now,
-          periodEnd: sub?.nextRenewal || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          dueDate: sub?.nextRenewal || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          date: sub?.startDate || now,
-        }
-      }).catch(() => null);
-
-      if (newRecord) {
-        billingRecordsList = [newRecord];
-      }
-    }
 
     // Ensure company card info is populated for payment method card
     if (!company.cardBrand) {

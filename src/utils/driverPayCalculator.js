@@ -382,8 +382,26 @@ function calculateDriverPayForLoad({ driver, load = null, distanceKm = 0, hoursW
   }
 
   const grossPay = result.grossPay || 0;
-  const paygTax = result.paygTax || 0;
-  const superContribution = result.superContribution || 0;
+  let paygTax = result.paygTax;
+  let superContribution = result.superContribution;
+
+  if (paygTax === undefined && driver) {
+    paygTax = calculateAtoPaygTax({
+      grossWeeklyPay: grossPay,
+      taxFreeThreshold: driver.taxFreeThreshold,
+      studyLoanDebt: driver.studyLoanDebt,
+      residencyStatus: driver.residencyStatus
+    });
+  }
+
+  if (superContribution === undefined && driver) {
+    const superRate = parseFloat(driver.superPercentage) || 12.0;
+    superContribution = Math.round((grossPay * (superRate / 100)) * 100) / 100;
+  }
+  
+  paygTax = paygTax || 0;
+  superContribution = superContribution || 0;
+
   const totalDeductions = paygTax;
   const netPay = result.netPay !== undefined ? result.netPay : Math.max(0, grossPay - paygTax);
 

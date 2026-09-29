@@ -2,7 +2,8 @@ const prisma = require('./prismaClient');
 const {
   calculateHourlyDriverPay,
   calculatePerKmDriverPay,
-  calculatePerLoadDriverPay
+  calculatePerLoadDriverPay,
+  calculateAtoPaygTax
 } = require('./driverPayCalculator');
 
 /**
@@ -29,9 +30,18 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
         driverId: driver.id,
         createdAt: { gte: start, lte: end }
       },
-      select: { workMinutes: true, totalMinutes: true, status: true }
+      select: { workMinutes: true, totalMinutes: true, status: true, clockInAt: true, clockOutAt: true, breakMinutes: true }
     });
-    workMinutes = timesheets.reduce((acc, t) => acc + (t.workMinutes || t.totalMinutes || 0), 0);
+    workMinutes = timesheets.reduce((acc, t) => {
+      // Calculate from exact timestamps if available
+      if (t.clockInAt && t.clockOutAt) {
+        const diffMs = new Date(t.clockOutAt).getTime() - new Date(t.clockInAt).getTime();
+        const diffMins = Math.max(0, diffMs / 60000);
+        const actualWorkMins = Math.max(0, diffMins - (t.breakMinutes || 0));
+        return acc + actualWorkMins;
+      }
+      return acc + (t.workMinutes || t.totalMinutes || 0);
+    }, 0);
   } catch (err) {
     console.warn('Could not fetch driver timesheets for pay calculation:', err?.message);
   }
@@ -56,12 +66,7 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
       select: { id: true, status: true, notes: true, createdAt: true, stops: { select: { type: true, address: true } }, truck: { select: { odometerKm: true } } }
     });
 
-    if (loads.length === 0 && driver.companyId) {
-      loads = await prisma.load.findMany({
-        where: { companyId: driver.companyId },
-        select: { id: true, status: true, notes: true, createdAt: true, stops: { select: { type: true, address: true } }, truck: { select: { odometerKm: true } } }
-      });
-    }
+    // Removed fallback that queried by companyId.
 
     completedLoadsCount = loads.filter(l => ['DELIVERED', 'COMPLETED', 'CLOSED'].includes(l.status)).length;
     activeLoadsCount = loads.filter(l => ['IN_TRANSIT', 'ASSIGNED', 'DISPATCHED'].includes(l.status)).length;
@@ -119,17 +124,19 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     totalLoadAmount = calcRes.grossPay || 0;
   }
 
-  if (totalLoadAmount <= 0 && defaultScheduleRate > 0) {
+  // Only use schedule rate as fallback if there are actual completed loads
+  if (totalLoadAmount <= 0 && defaultScheduleRate > 0 && completedLoadsCount > 0) {
     totalLoadAmount = defaultScheduleRate;
   }
 
   if (normalizedType.includes('load')) {
     // === PER LOAD ===
-    if (totalLoadAmount <= 0 && rawRate > 0) {
-      totalLoadAmount = rawRate;
+    // Only calculate pay if driver has actual completed loads
+    if (completedLoadsCount > 0) {
+      loadAllowance = Math.round(totalLoadAmount * 100) / 100;
+      basePay = loadAllowance;
     }
-    loadAllowance = Math.round(totalLoadAmount * 100) / 100;
-    basePay = loadAllowance;
+    // If no loads completed yet, pay stays at $0.00
   } else if (normalizedType.includes('km') || normalizedType.includes('kilometre')) {
     // === PER KM ===
     const calc = calculatePerKmDriverPay({ distanceKm: totalKmDriven, perKmRate: rawRate });
@@ -169,15 +176,23 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
   }
   let grossEarnings = Math.round((basePay + overtimePay + loadAllowance + distanceAllow + otherAllowance + bonuses) * 100) / 100;
 
-  // Fallback: If gross earnings evaluates to 0
-  if (grossEarnings === 0) {
-    if (rawRate > 0) grossEarnings = rawRate;
-    else if (defaultScheduleRate > 0) grossEarnings = defaultScheduleRate;
-    else grossEarnings = 500.00;
-    basePay = grossEarnings;
-    loadAllowance = grossEarnings;
-  }
+  // If no real data, gross stays at 0
+  // No dummy fallback - return actual computed value only
   
+  if (paygTax === 0 && driver) {
+    paygTax = calculateAtoPaygTax({
+      grossWeeklyPay: grossEarnings,
+      taxFreeThreshold: driver.taxFreeThreshold,
+      studyLoanDebt: driver.studyLoanDebt,
+      residencyStatus: driver.residencyStatus
+    });
+  }
+
+  if (superAmount === 0 && driver) {
+    const superRate = parseFloat(driver.superPercentage) || 12.0;
+    superAmount = Math.round((grossEarnings * (superRate / 100)) * 100) / 100;
+  }
+
   const totalDeductions = paygTax;
   const netPay = Math.round(Math.max(0, grossEarnings - paygTax) * 100) / 100;
 

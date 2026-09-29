@@ -166,25 +166,8 @@ const resolveDriver = async (req) => {
     }
   }
 
-  // 6. Global Fallback: return any existing driver in DB if available
-  const anyDriver = await prisma.driver.findFirst({
-    include: {
-      currentVehicle: true,
-      company: true,
-      branch: true
-    },
-    orderBy: { createdAt: 'desc' }
-  }).catch(() => null);
-
-  if (anyDriver) {
-    if (userId && !anyDriver.userId && (req.user?.role === 'DRIVER' || dbUser?.role === 'DRIVER')) {
-      await prisma.driver.update({
-        where: { id: anyDriver.id },
-        data: { userId }
-      }).catch(() => {});
-    }
-    return anyDriver;
-  }
+  // 6. Removed Global Fallback to prevent data leakage and dummy data from other companies.
+  // We should never return anyDriver if the driver doesn't belong to the tenant.
 
   // 7. Auto-provision a Driver profile if this user has DRIVER role but no profile yet
   if (dbUser && (dbUser.role === 'DRIVER' || req.user?.role === 'DRIVER')) {
@@ -3008,7 +2991,7 @@ exports.getPayrollData = async (req, res, next) => {
 
     const [dbPayPeriods, activeLoadsRaw] = await Promise.all([
       prisma.payPeriod ? prisma.payPeriod.findMany({
-        where: { OR: [{ driverId: driver.id }, ...(driver.companyId ? [{ companyId: driver.companyId }] : [])] },
+        where: { driverId: driver.id },
         orderBy: { periodStart: 'desc' },
         take: 20
       }).catch(() => []) : [],
@@ -3021,14 +3004,6 @@ exports.getPayrollData = async (req, res, next) => {
     ]);
 
     let activeLoads = activeLoadsRaw;
-    if (activeLoads.length === 0 && driver.companyId) {
-      activeLoads = await prisma.load.findMany({
-        where: { companyId: driver.companyId },
-        include: { truck: true, items: true, stops: true },
-        orderBy: { createdAt: 'desc' },
-        take: 5
-      }).catch(() => []);
-    }
 
     const activeLoad = activeLoads.find(l => ['ASSIGNED', 'IN_TRANSIT', 'DISPATCHED', 'ACTIVE', 'PENDING'].includes(l.status)) || activeLoads[0] || null;
     const loadRef = activeLoad ? (activeLoad.loadNumber || activeLoad.loadRef || `LD-${activeLoad.id.slice(0, 4).toUpperCase()}`) : '';
@@ -3129,15 +3104,15 @@ exports.getPayrollData = async (req, res, next) => {
 
     const effectiveBase = (latestPeriod?.basePay || 0) > 0 
       ? latestPeriod.basePay 
-      : (!isPerLoad && !isPerKm ? (livePay?.basePay || effectiveGross) : 0);
+      : (!isPerLoad && !isPerKm ? (livePay?.basePay || 0) : 0);
 
     const effectiveLoadAllow = (latestPeriod?.loadAllowance || 0) > 0 
       ? latestPeriod.loadAllowance 
-      : (isPerLoad ? (livePay?.loadAllowance || effectiveGross) : (livePay?.loadAllowance || 0));
+      : (isPerLoad ? (livePay?.loadAllowance || 0) : (livePay?.loadAllowance || 0));
 
     const effectiveDistAllow = (latestPeriod?.distanceAllow || 0) > 0 
       ? latestPeriod.distanceAllow 
-      : (isPerKm ? (livePay?.distanceAllow || effectiveGross) : (livePay?.distanceAllow || 0));
+      : (isPerKm ? (livePay?.distanceAllow || 0) : (livePay?.distanceAllow || 0));
 
     const effectiveTax = 0;
     const effectiveSuper = 0;
@@ -3163,7 +3138,7 @@ exports.getPayrollData = async (req, res, next) => {
 
     const nextPaymentPeriodStr = latestPeriod?.periodStart && latestPeriod?.periodEnd
       ? `${new Date(latestPeriod.periodStart).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })} - ${new Date(latestPeriod.periodEnd).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`
-      : `Current ${livePay.payType} Pay Cycle`;
+      : '—';
 
     return sendSuccess(res, {
       driverInfo: {
@@ -3185,7 +3160,7 @@ exports.getPayrollData = async (req, res, next) => {
         payFrequency: latestPeriod?.frequency || 'Fortnightly',
         nextPayment: {
           date: latestPeriod?.payDate ? new Date(latestPeriod.payDate).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'Next Scheduled Pay Cycle',
-          daysLeft: latestPeriod?.payDate ? Math.max(0, Math.ceil((new Date(latestPeriod.payDate) - new Date()) / (1000 * 60 * 60 * 24))) : 5,
+          daysLeft: latestPeriod?.payDate ? Math.max(0, Math.ceil((new Date(latestPeriod.payDate) - new Date()) / (1000 * 60 * 60 * 24))) : 0,
           period: nextPaymentPeriodStr,
           estimatedNetPay: fmtMoney(effectiveNetPay),
           status: latestPeriod?.status || 'Active Accrual'
@@ -3193,9 +3168,9 @@ exports.getPayrollData = async (req, res, next) => {
       },
       ytdSummary: {
         financialYear: `Financial Year ${new Date().getFullYear() - 1}/${String(new Date().getFullYear()).slice(-2)}`,
-        totalEarnings: fmtMoney(totalGrossEarnings > 0 ? totalGrossEarnings : effectiveGross),
-        netPayReceived: fmtMoney(totalNetPaid > 0 ? totalNetPaid : effectiveNetPay),
-        pendingPayments: fmtMoney(pendingPayments > 0 ? pendingPayments : (latestPeriod?.status === 'PROCESSING' ? effectiveNetPay : effectiveGross)),
+        totalEarnings: fmtMoney(totalGrossEarnings),
+        netPayReceived: fmtMoney(totalNetPaid),
+        pendingPayments: fmtMoney(pendingPayments),
         totalDeductions: fmtMoney(effectiveDed),
         totalSuperannuation: fmtMoney(effectiveSuper)
       },
@@ -3223,12 +3198,12 @@ exports.getPayrollData = async (req, res, next) => {
       },
       payHistory: payRecords,
       totalSummary: {
-        totalGrossEarnings: `$${(totalGrossEarnings > 0 ? totalGrossEarnings : effectiveGross).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        totalGrossEarnings: fmtMoney(totalGrossEarnings),
         totalDeductions: '$0.00',
-        totalNetPaid: `$${(totalNetPaid > 0 ? totalNetPaid : effectiveGross).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        totalNetPaid: fmtMoney(totalNetPaid)
       },
       ytdEarningsBreakdown: {
-        total: `$${(totalGrossEarnings > 0 ? totalGrossEarnings : effectiveGross).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        total: fmtMoney(totalGrossEarnings),
         items: [
           { name: 'Base Pay', amount: fmtMoney(effectiveBase) },
           { name: 'Load Allowances', amount: fmtMoney(effectiveLoadAllow) },
