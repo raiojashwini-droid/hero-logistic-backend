@@ -334,6 +334,25 @@ exports.create = async (req, res, next) => {
     delete payload.driverPay;
     delete payload.driverRate;
 
+    // Attach immutable pricing snapshot and initialize billing status
+    try {
+      const PricingService = require('../services/PricingService');
+      const snapshot = await PricingService.buildLoadPricingSnapshot({
+        customerId: payload.customerId,
+        type: payload.type,
+        items: Array.isArray(payload.items?.create) ? payload.items.create : [],
+        stops: Array.isArray(payload.stops?.create) ? payload.stops.create : [],
+        agreedRate,
+        companyId: payload.companyId,
+        user: req.user
+      });
+      payload.pricingSnapshot = snapshot;
+      payload.pricingStatus = 'AUTO_CALCULATED';
+      payload.billingStatus = 'NOT_READY';
+    } catch (snapErr) {
+      console.warn('Load pricing snapshot build warning:', snapErr?.message);
+    }
+
     const cleanedPayload = cleanLoadPayload(payload);
 
     const data = await prisma.load.create({
@@ -366,6 +385,30 @@ exports.create = async (req, res, next) => {
     }
 
     return sendSuccess(res, data, HTTP_STATUS.CREATED);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Price Override with Audit Trail
+exports.overridePrice = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { originalPrice, newPrice, reason } = req.body;
+    const companyId = getEffectiveCompanyId(req);
+    const changedBy = req.user?.name || req.user?.email || 'Admin User';
+
+    const PricingService = require('../services/PricingService');
+    const updated = await PricingService.recordPriceOverride({
+      loadId: id,
+      originalPrice,
+      newPrice,
+      changedBy,
+      reason: reason || 'Manual price override',
+      companyId
+    });
+
+    return sendSuccess(res, updated);
   } catch (error) {
     next(error);
   }

@@ -23,5 +23,6 @@ router.route('/:id')
 router.post('/:id/activate', requireIdempotency, LoadController.activate);
 router.post('/:id/assignments', LoadController.assign);
 router.post('/:id/status-transitions', LoadController.updateStatus);
+router.post('/:id/override-price', LoadController.overridePrice);
 
 module.exports = router;

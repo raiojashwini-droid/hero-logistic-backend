@@ -181,6 +181,12 @@ router.get('/customers', CustomerController.getAll);
 router.delete('/customers/all', CustomerController.deleteAll);
 router.delete('/customers/:id', CustomerController.delete);
 
+// 20.1 Customer Pricing Profiles & Billing Rules
+router.get('/customers/:id/pricing-profiles', CustomerController.getPricingProfiles);
+router.post('/customers/:id/pricing-profiles', CustomerController.savePricingProfile);
+router.get('/customers/:id/billing-rules', CustomerController.getBillingRules);
+router.post('/customers/:id/billing-rules', CustomerController.saveBillingRule);
+
 // 21. Subscription & Billing
 router.get('/subscription-billing', ctrl.getSubscriptionBilling);
 router.get('/subscription-billing/plans', ctrl.getAvailableSubscriptionPlans);
@@ -189,5 +195,8 @@ router.put('/subscription-billing/plan', ctrl.updateSubscriptionPlan);
 
 // Utility: one-time cleanup of wrongly-defaulted driver fields
 router.get('/cleanup-driver-defaults', ctrl.cleanupDriverDefaults);
+
+// Consolidated Invoicing
+router.post('/billing/consolidate', ctrl.generateConsolidatedInvoices);
 
 module.exports = router;

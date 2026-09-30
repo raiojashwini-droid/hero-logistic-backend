@@ -43,6 +43,10 @@ async function syncMissingVehicleColumns() {
       `ALTER TABLE load_item ADD COLUMN damageReportReq TINYINT(1) DEFAULT 0`,
       `ALTER TABLE load_item ADD COLUMN receivedDate DATETIME`,
       `ALTER TABLE load_lane ADD COLUMN area VARCHAR(255)`,
+      `ALTER TABLE \`load\` ADD COLUMN pricingSnapshot JSON`,
+      `ALTER TABLE \`load\` ADD COLUMN pricingStatus VARCHAR(255) DEFAULT 'AUTO_CALCULATED'`,
+      `ALTER TABLE \`load\` ADD COLUMN billingStatus VARCHAR(255) DEFAULT 'NOT_READY'`,
+      `ALTER TABLE \`load\` ADD COLUMN priceOverrideAudit JSON`,
       `CREATE TABLE IF NOT EXISTS platform_setting (
         id VARCHAR(255) PRIMARY KEY,
         defaultCurrency VARCHAR(50) NOT NULL DEFAULT 'USD',

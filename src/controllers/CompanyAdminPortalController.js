@@ -388,9 +388,10 @@ exports.updateLoad = async (req, res, next) => {
       else delete payload.priority;
     }
 
-    // Extract stops, items, and driverPay before cleaning
+    // Extract stops, items, agreedRate, and driverPay before cleaning
     const stops = payload.stops;
     const items = payload.items;
+    const agreedRate = payload.rate || payload.price || payload.revenue || payload.customerRate || null;
     const newDriverPay = payload.driverPay ? parseFloat(payload.driverPay) : null;
 
     delete payload.stops;
@@ -428,6 +429,13 @@ exports.updateLoad = async (req, res, next) => {
     delete payload.driver;
     delete payload.truck;
     delete payload.trailer;
+
+    if (agreedRate !== null && parseFloat(agreedRate) > 0) {
+      const baseNotes = (payload.notes || targetLoad.notes || '')
+        .replace(/\[AGREED_RATE:[^\]]+\]/g, '')
+        .trim();
+      payload.notes = `${baseNotes} [AGREED_RATE:${parseFloat(agreedRate)}]`.trim();
+    }
 
     // Remove empty/invalid relation IDs to prevent foreign key errors
     if (!payload.customerId) delete payload.customerId;
@@ -509,6 +517,20 @@ exports.updateLoad = async (req, res, next) => {
       data: cleanedData,
       include: { driver: true, truck: true, trailer: true, customer: true, stops: true, items: true }
     });
+
+    if (agreedRate !== null && parseFloat(agreedRate) > 0) {
+      try {
+        const inv = await prisma.customerInvoice.findFirst({ where: { loadId: data.id } });
+        if (inv) {
+          await prisma.customerInvoice.update({
+            where: { id: inv.id },
+            data: { amount: parseFloat(agreedRate) }
+          });
+        } else {
+          await exports.autoGenerateLoadInvoice(data.id, data.companyId, parseFloat(agreedRate));
+        }
+      } catch (e) {}
+    }
 
     // P0: When transitioning to DELIVERED, COMPLETED, or FULFILLED, auto-credit payroll
     if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(payload.status) || ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status)) {
@@ -656,6 +678,28 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
     }).catch(() => null);
 
     if (!targetLoad) return null;
+
+    // Evaluate Billing Readiness
+    const PricingService = require('../services/PricingService');
+    const billingStatus = await PricingService.evaluateBillingStatus(loadId);
+    
+    if (billingStatus !== 'READY_TO_INVOICE') {
+      return null; // Not ready to invoice yet
+    }
+
+    // Check Customer Billing Rules for Grouping
+    const billingRule = await prisma.customerBillingRule.findFirst({
+      where: { customerId: targetLoad.customerId }
+    }).catch(() => null);
+
+    if (billingRule && !billingRule.autoCreateInvoice) {
+       return null; // Auto-invoicing disabled for this customer
+    }
+
+    if (billingRule && ['weekly', 'monthly', 'fortnightly'].includes((billingRule.invoiceGrouping || '').toLowerCase())) {
+       // Grouping rule prevents immediate per-load invoicing. A separate cron job handles this.
+       return null; 
+    }
 
     // 3. Customer Resolution
     let customerId = targetLoad.customerId;
@@ -2354,9 +2398,7 @@ exports.getPayroll = async (req, res, next) => {
     const driverWhereScope = companyId ? {
       OR: [
         { companyId },
-        { company: { id: companyId } },
-        { companyId: null },
-        { companyId: 'default' }
+        { company: { id: companyId } }
       ]
     } : {};
 
@@ -2373,38 +2415,25 @@ exports.getPayroll = async (req, res, next) => {
     for (const d of drivers) {
       const calc = await calculateDriverPay({ driver: d, startDate: periodStart, endDate: periodEnd, companyId });
       let gross = calc ? (calc.grossEarnings || calc.loadAllowance || calc.basePay || 0) : 0;
-      if (gross === 0) {
-        gross = parseFloat(d.payRate) || 300.00;
-      }
 
       let existing = payPeriods.find(p => p.driverId === d.id);
       if (existing) {
         if (gross > 0) {
-          try {
-            await prisma.payPeriod.update({
-              where: { id: existing.id },
-              data: {
-                grossEarnings: gross,
-                netPay: gross,
-                loadAllowance: gross,
-                basePay: gross
-              }
-            });
-          } catch (uErr) {}
           existing.grossEarnings = gross;
           existing.netPay = gross;
           existing.loadAllowance = gross;
           existing.basePay = gross;
         }
         liveRuns.push(existing);
-      } else {
+      } else if (gross > 0) {
+        // Only include if driver actually earned pay in this period
         try {
           const crypto = require('crypto');
           const createdPeriod = await prisma.payPeriod.create({
             data: {
               id: crypto.randomUUID(),
               driverId: d.id,
-              companyId: companyId || d.companyId || 'default',
+              companyId: companyId || d.companyId,
               periodStart,
               periodEnd,
               frequency: 'WEEKLY',
@@ -2456,10 +2485,6 @@ exports.getPayroll = async (req, res, next) => {
     let pendingRuns = payPeriods.filter(p => p.status === 'DRAFT' || p.status === 'PENDING' || p.status === 'PROCESSING');
     let pendingAmount = pendingRuns.reduce((sum, p) => sum + (toNumber(p.grossEarnings) || toNumber(p.netPay) || 0), 0);
 
-    if (totalPayrollMTD === 0 && pendingAmount > 0) {
-      totalPayrollMTD = pendingAmount;
-    }
-
     const approvedTimesheets = timesheets.filter(t => t.status === 'APPROVED').length;
     const allTimesheets = timesheets.length;
     const timesheetApprovalRate = allTimesheets > 0 ? Math.round((approvedTimesheets / allTimesheets) * 100) : 0;
@@ -2467,9 +2492,9 @@ exports.getPayroll = async (req, res, next) => {
     return sendSuccess(res, {
       stats: {
         totalPayrollMTD,
-        activeDriversPaid: driverCount || payPeriods.length || 0,
+        activeDriversPaid: drivers.length,
         pendingPayRun: pendingAmount,
-        stpStatus: 'Compliant',
+        stpStatus: payPeriods.length > 0 ? 'Compliant' : 'Not Configured',
         timesheetApprovalRate,
       },
       payrollRuns: payPeriods,
@@ -2614,9 +2639,7 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
     const driverWhereScope = companyId ? {
       OR: [
         { companyId },
-        { company: { id: companyId } },
-        { companyId: null },
-        { companyId: 'default' }
+        { company: { id: companyId } }
       ]
     } : {};
 
@@ -2633,9 +2656,6 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
     for (const d of drivers) {
       const calc = await calculateDriverPay({ driver: d, startDate: periodStart, endDate: periodEnd, companyId });
       let gross = calc ? (calc.grossEarnings || calc.loadAllowance || calc.basePay || 0) : 0;
-      if (gross === 0) {
-        gross = parseFloat(d.payRate) || 500.00;
-      }
 
       let existing = payPeriods.find(p => p.driverId === d.id);
       if (existing) {
@@ -2646,7 +2666,7 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
           existing.basePay = gross;
         }
         liveBreakdowns.push(existing);
-      } else {
+      } else if (gross > 0) {
         liveBreakdowns.push({
           id: `live-${d.id}`,
           driverId: d.id,
@@ -5368,4 +5388,78 @@ exports.cleanupDriverDefaults = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
+
+
+exports.generateConsolidatedInvoices = async (req, res, next) => {
+  try {
+    const { companyId } = req.user;
+    
+    // Find all customers with grouping rules set to weekly/monthly
+    const groupingRules = await prisma.customerBillingRule.findMany({
+      where: {
+        invoiceGrouping: { in: ['Weekly', 'Monthly', 'Fortnightly', 'weekly', 'monthly', 'fortnightly'] }
+      }
+    });
+
+    let generatedInvoices = [];
+
+    for (const rule of groupingRules) {
+      // Find all READY_TO_INVOICE loads for this customer that don't have an invoice yet
+      const eligibleLoads = await prisma.load.findMany({
+        where: {
+           customerId: rule.customerId,
+           companyId: companyId,
+           billingStatus: 'READY_TO_INVOICE',
+           invoices: { none: {} }
+        },
+        include: { customer: true }
+      });
+
+      if (eligibleLoads.length > 0) {
+         // Create ONE consolidated invoice
+         let totalAmount = 0;
+         const loadRefs = [];
+         for (const load of eligibleLoads) {
+            if (load.pricingSnapshot && load.pricingSnapshot.totalIncGst) {
+               totalAmount += parseFloat(load.pricingSnapshot.totalIncGst);
+            } else {
+               // Fallback if no snapshot
+               totalAmount += 250;
+            }
+            loadRefs.push(load.loadRef || load.id);
+         }
+
+         const crypto = require('crypto');
+         const invNum = \INV-\-\\;
+         const dueDate = new Date();
+         dueDate.setDate(dueDate.getDate() + (rule.paymentTerms || 14));
+
+         const invoice = await prisma.customerInvoice.create({
+            data: {
+              id: crypto.randomUUID(),
+              invoiceNumber: invNum,
+              customerId: rule.customerId,
+              loadId: eligibleLoads[0].id, // Link to first load for DB constraint, but notes mention all
+              amount: totalAmount,
+              status: 'DRAFT',
+              dueDate,
+              notes: \Consolidated \ invoice for loads: \\
+            }
+         });
+         
+         // Update loads so they are marked as invoiced
+         await prisma.load.updateMany({
+            where: { id: { in: eligibleLoads.map(l => l.id) } },
+            data: { billingStatus: 'INVOICED' }
+         });
+
+         generatedInvoices.push(invoice);
+      }
+    }
+
+    return res.status(200).json({ success: true, message: 'Consolidated invoices generated', count: generatedInvoices.length, data: generatedInvoices });
+  } catch (error) {
+    next(error);
+  }
+};
 

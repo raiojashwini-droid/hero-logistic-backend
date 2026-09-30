@@ -1243,6 +1243,12 @@ model Load {
 
   incidents DriverIncident[]
 
+  // Pricing Snapshot & Audit Trail (Immutable Load Charges)
+  pricingSnapshot    Json? // Stores { rateCardId, method, baseRate, quantity, fuelLevyPercent, fuelLevyAmount, totalExGst, gst, totalIncGst, snapshotDate }
+  pricingStatus      String   @default("AUTO_CALCULATED") // AUTO_CALCULATED, OVERRIDDEN
+  billingStatus      String   @default("NOT_READY") // NOT_READY, READY_TO_INVOICE, INVOICED
+  priceOverrideAudit Json? // Stores audit log array of price overrides
+
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
@@ -1651,10 +1657,73 @@ model Customer {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
+  pricingProfiles  CustomerPricingProfile[]
+  billingRules     CustomerBillingRule[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("customer")
+}
+
+model CustomerPricingProfile {
+  id               String   @id @default(uuid())
+  customerId       String
+  customer         Customer @relation(fields: [customerId], references: [id])
+  name             String   // e.g. ABC Motors NSW Rate Card
+  transportNiche   String?
+  effectiveFrom    DateTime?
+  effectiveTo      DateTime?
+  origin           String?
+  destination      String?
+  zone             String?
+  serviceType      String?
+  freightType      String?
+  calculationMethod String? // Per Load, Per Item, Per km, etc.
+  minimumCharge    Float?
+  baseRate         Float?
+  fuelLevyPercent  Float?
+  additionalStopCharge Float?
+  waitingTimeCharge Float?
+  storageCharge    Float?
+  tollsCharge      Float?
+  dgSurcharge      Float?
+  afterHoursSurcharge Float?
+  redeliveryCharge Float?
+  otherCharges     Float?
+  gstTreatment     String?
+  autoCalculation  Boolean  @default(true)
+  priority         Int      @default(1)
+  version          Int      @default(1)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("customer_pricing_profile")
+}
+
+model CustomerBillingRule {
+  id                 String   @id @default(uuid())
+  customerId         String
+  customer           Customer @relation(fields: [customerId], references: [id])
+  name               String   // e.g. ABC Motors Standard Billing
+  invoiceTrigger     String?  // Delivery completed, All items delivered, POD received
+  invoiceFrequency   String?  
+  invoiceGrouping    String?  // Per load, Per item, Daily, Weekly
+  invoiceRecipient   String?  
+  paymentTerms       String?
+  requiredReferences String?  // e.g. PO number
+  requiredDocuments  String?  // e.g. POD
+  approvalRequired   Boolean  @default(false)
+  autoCreateInvoice  Boolean  @default(true)
+  autoSendInvoice    Boolean  @default(true)
+  consolidationRules String?
+  creditHandling     String?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("customer_billing_rule")
 }
 
 // ----------------------------------------------------------------------

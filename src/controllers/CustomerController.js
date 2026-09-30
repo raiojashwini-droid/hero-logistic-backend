@@ -416,15 +416,29 @@ exports.getContacts = async (req, res, next) => {
     }
 
     const contacts = [];
-    if (customer.contactName || customer.email || customer.phone) {
-      const parts = (customer.contactName || '').trim().split(' ');
+    // Only build a contact if customer has a REAL contactName (not empty, not generic defaults)
+    const rawContactName = (customer.contactName || '').trim();
+    const isRealContact = rawContactName
+      && rawContactName !== 'N/A'
+      && rawContactName !== 'Primary Contact'
+      && rawContactName !== 'Primary'
+      && rawContactName !== 'Contact';
+
+    if (isRealContact) {
+      const parts = rawContactName.split(' ');
+      const firstName = parts[0] || '';
+      const lastName = parts.slice(1).join(' ') || '';
+      const realEmail = (customer.email || '').trim();
+      const isRealEmail = realEmail && realEmail !== 'N/A' && realEmail !== 'contact@example.com';
+      const realPhone = (customer.phone || '').trim();
+      const isRealPhone = realPhone && realPhone !== 'N/A';
       contacts.push({
         id: '1',
-        firstName: parts[0] || 'Primary',
-        lastName: parts.slice(1).join(' ') || 'Contact',
+        firstName,
+        lastName,
         role: 'Primary Contact',
-        email: customer.email || 'N/A',
-        phone: customer.phone || 'N/A',
+        email: isRealEmail ? realEmail : '',
+        phone: isRealPhone ? realPhone : '',
         isPrimary: true
       });
     }
@@ -522,3 +536,103 @@ exports.deleteRateCard = async (req, res, next) => {
   }
 };
 
+// --- DB-Backed Pricing Profiles ---
+
+exports.getPricingProfiles = async (req, res, next) => {
+  try {
+    const data = await prisma.customerPricingProfile.findMany({
+      where: { customerId: req.params.id }
+    });
+    // Map to frontend expected format
+    const mapped = data.map(p => ({
+      id: p.id,
+      customerId: p.customerId,
+      name: p.name || `${p.origin || ''} ➔ ${p.destination || ''}`,
+      from: p.origin || '',
+      to: p.destination || '',
+      method: p.calculationMethod || 'Per Load',
+      baseRate: p.baseRate || 0,
+      fuelLevy: p.fuelLevyPercent || 0,
+      description: p.name,
+      rate: p.baseRate || 0,
+      unit: p.calculationMethod || 'Per Load',
+      distance: null,
+      type: p.transportNiche || 'Interstate',
+      gstMode: 'EXC_GST'
+    }));
+    return sendSuccess(res, mapped);
+  } catch (error) { next(error); }
+};
+
+exports.savePricingProfile = async (req, res, next) => {
+  try {
+    const { id, name, from, to, method, baseRate, fuelLevy, description, rate, unit } = req.body;
+    let result;
+    
+    // Convert from frontend schema
+    const dataObj = {
+      customerId: req.params.id,
+      name: name || description || `${from} ➔ ${to}`,
+      origin: from,
+      destination: to,
+      calculationMethod: method || unit,
+      baseRate: parseFloat(baseRate) || parseFloat(rate) || 0,
+      fuelLevyPercent: parseFloat(fuelLevy) || 0
+    };
+
+    if (id && id.length > 20) { // basic UUID check vs frontend timestamp
+       result = await prisma.customerPricingProfile.update({
+         where: { id },
+         data: dataObj
+       });
+    } else {
+       result = await prisma.customerPricingProfile.create({
+         data: dataObj
+       });
+    }
+    return sendSuccess(res, result);
+  } catch (error) { next(error); }
+};
+
+// --- DB-Backed Billing Rules ---
+
+exports.getBillingRules = async (req, res, next) => {
+  try {
+    const data = await prisma.customerBillingRule.findMany({
+      where: { customerId: req.params.id }
+    });
+    return sendSuccess(res, data);
+  } catch (error) { next(error); }
+};
+
+exports.saveBillingRule = async (req, res, next) => {
+  try {
+    const { id, name, invoiceTrigger, invoiceGrouping, paymentTerms, requiredReferences, requiredDocuments, autoCreateInvoice, autoSendInvoice, approvalRequired } = req.body;
+    let result;
+
+    const dataObj = {
+      customerId: req.params.id,
+      name: name || 'Standard Billing Rule',
+      invoiceTrigger,
+      invoiceGrouping,
+      paymentTerms,
+      requiredReferences,
+      requiredDocuments,
+      autoCreateInvoice: Boolean(autoCreateInvoice),
+      autoSendInvoice: Boolean(autoSendInvoice),
+      approvalRequired: Boolean(approvalRequired)
+    };
+
+    if (id && id.length > 20) {
+       result = await prisma.customerBillingRule.update({
+         where: { id },
+         data: dataObj
+       });
+    } else {
+       result = await prisma.customerBillingRule.create({
+         data: dataObj
+       });
+    }
+    return sendSuccess(res, result);
+  } catch (error) { next(error); }
+};
