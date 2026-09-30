@@ -5430,7 +5430,7 @@ exports.generateConsolidatedInvoices = async (req, res, next) => {
          }
 
          const crypto = require('crypto');
-         const invNum = \INV-\-\\;
+         const invNum = `INV-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
          const dueDate = new Date();
          dueDate.setDate(dueDate.getDate() + (rule.paymentTerms || 14));
 
@@ -5443,7 +5443,7 @@ exports.generateConsolidatedInvoices = async (req, res, next) => {
               amount: totalAmount,
               status: 'DRAFT',
               dueDate,
-              notes: \Consolidated \ invoice for loads: \\
+              notes: `Consolidated ${rule.invoiceGrouping} invoice for loads: ${loadRefs.join(', ')}`
             }
          });
          
