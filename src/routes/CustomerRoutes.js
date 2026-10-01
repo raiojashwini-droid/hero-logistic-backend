@@ -30,4 +30,16 @@ router.route('/:id/rate-cards/:cardId')
   .put(CustomerController.updateRateCard)
   .delete(CustomerController.deleteRateCard);
 
+router.route('/:id/pricing-profiles')
+  .get(CustomerController.getPricingProfiles)
+  .post(CustomerController.savePricingProfile);
+
+router.route('/:id/surcharges')
+  .get(CustomerController.getSurcharges)
+  .post(CustomerController.saveSurcharge);
+
+router.route('/:id/billing-rules')
+  .get(CustomerController.getBillingRules)
+  .post(CustomerController.saveBillingRule);
+
 module.exports = router;

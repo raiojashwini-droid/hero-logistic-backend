@@ -24,7 +24,8 @@ class PricingService {
         }).catch(() => null);
 
         pricingProfiles = await prisma.customerPricingProfile.findMany({
-          where: { customerId }
+          where: { customerId, isActive: true },
+          orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }]
         }).catch(() => []);
 
         billingRule = await prisma.customerBillingRule.findFirst({
@@ -86,35 +87,36 @@ class PricingService {
          } else {
             baseCharge = unitPrice; // Per Load / Flat Route
          }
+
+         // Enforce Minimum Charge requirement
+         if (matchedProfile.minimumCharge && baseCharge < matchedProfile.minimumCharge) {
+           baseCharge = matchedProfile.minimumCharge;
+         }
       }
 
       let isOverride = false;
       let providedRate = agreedRate !== null && agreedRate !== undefined && !isNaN(parseFloat(agreedRate)) ? parseFloat(agreedRate) : null;
 
-      if (providedRate !== null && Math.abs(providedRate - (baseCharge + (baseCharge * fuelLevyPercent / 100))) > 0.01) {
-         // Provided rate is different from DB rate
-         // Check permissions
+      if (!matchedProfile && providedRate !== null) {
+         // No DB profile matched, accept provided rate as agreed load rate
+         baseCharge = providedRate;
+         pricingMethod = 'Flat Route / Agreed';
+         unitPrice = baseCharge;
+         rateCardName = 'Agreed Rate';
+      } else if (providedRate !== null && Math.abs(providedRate - (baseCharge + (baseCharge * fuelLevyPercent / 100))) > 0.01) {
+         // DB profile exists, but provided rate is different -> check override permission
          const allowedRoles = ['SUPER_ADMIN', 'COMPANY_ADMIN', 'ADMIN', 'ACCOUNTS', 'MANAGER'];
          const userRole = user?.role?.toUpperCase();
          
-         if (userRole && allowedRoles.includes(userRole)) {
-           // Allow override! Assume the provided rate is the base charge (ignoring fuel for now, or assume it's total ex gst).
-           // Let's assume the provided rate replaces the baseCharge.
+         if (!user || (userRole && allowedRoles.includes(userRole))) {
            baseCharge = providedRate;
            pricingMethod = 'Manual Override';
            unitPrice = baseCharge;
            isOverride = true;
            rateCardName = 'Manual Override Rate';
          } else {
-           // Unauthorized override attempt! Ignore provided rate and stick to DB calculated rate
            console.warn(`Unauthorized price override attempt by ${user?.email || 'Unknown User'}. Falling back to DB profile rate.`);
          }
-      } else if (!matchedProfile && providedRate !== null) {
-         // No DB profile, just accept provided rate as flat route
-         baseCharge = providedRate;
-         pricingMethod = 'Flat Route / Agreed';
-         unitPrice = baseCharge;
-         rateCardName = 'Fallback Rate Card';
       }
 
       let fuelLevyAmount = Math.round((baseCharge * (fuelLevyPercent / 100)) * 100) / 100;
@@ -150,17 +152,30 @@ class PricingService {
         }
       }
 
-      // Subtotal ex GST
-      const totalExGst = Math.round((baseCharge + fuelLevyAmount + surchargesTotal) * 100) / 100;
-      
-      // GST Calculation based on billing config (if present), else default to 10%
-      let gstPercent = 0.10;
-      if (matchedProfile && matchedProfile.gstTreatment === 'GST_FREE') {
-        gstPercent = 0.00;
+      // GST Calculation based on matched profile gstTreatment
+      let gstTreatment = (matchedProfile?.gstTreatment || 'GST_EXCLUSIVE').toUpperCase();
+      let totalExGst = 0;
+      let gst = 0;
+      let totalIncGst = 0;
+      let gstPercent = 10;
+
+      if (gstTreatment.includes('FREE') || gstTreatment.includes('EXEMPT')) {
+        gstPercent = 0;
+        totalExGst = Math.round((baseCharge + fuelLevyAmount + surchargesTotal) * 100) / 100;
+        gst = 0;
+        totalIncGst = totalExGst;
+      } else if (gstTreatment.includes('INC') || gstTreatment.includes('INCLUSIVE')) {
+        gstPercent = 10;
+        totalIncGst = Math.round((baseCharge + fuelLevyAmount + surchargesTotal) * 100) / 100;
+        totalExGst = Math.round((totalIncGst / 1.10) * 100) / 100;
+        gst = Math.round((totalIncGst - totalExGst) * 100) / 100;
+      } else {
+        // Default GST Exclusive / Plus GST 10%
+        gstPercent = 10;
+        totalExGst = Math.round((baseCharge + fuelLevyAmount + surchargesTotal) * 100) / 100;
+        gst = Math.round((totalExGst * 0.10) * 100) / 100;
+        totalIncGst = Math.round((totalExGst + gst) * 100) / 100;
       }
-      
-      const gst = Math.round((totalExGst * gstPercent) * 100) / 100;
-      const totalIncGst = Math.round((totalExGst + gst) * 100) / 100;
 
       const snapshot = {
         rateCardId: matchedProfile?.id || null,
@@ -173,8 +188,9 @@ class PricingService {
         fuelLevyPercent,
         fuelLevyAmount,
         surchargesTotal,
+        gstTreatment,
         totalExGst,
-        gstPercent: gstPercent * 100,
+        gstPercent,
         gst,
         totalIncGst,
         snapshotDate: new Date().toISOString()
@@ -218,43 +234,91 @@ class PricingService {
       if (!load) return 'NOT_READY';
 
       const isDelivered = ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(load.status);
-      const hasPod = (load.deliveryPods && load.deliveryPods.length > 0) || (load.documents && load.documents.some(d => d.type === 'POD' || d.type === 'Delivery Signature'));
+      const hasPod = (load.deliveryPods && load.deliveryPods.length > 0) || (load.documents && load.documents.some(d => (d.type || '').toUpperCase().includes('POD') || (d.name || '').toUpperCase().includes('POD')));
 
       const billingRule = await prisma.customerBillingRule.findFirst({
         where: { customerId: load.customerId }
       }).catch(() => null);
 
       let isReady = false;
+      let blockedReason = null;
 
       if (billingRule) {
-        let conditionsMet = isDelivered; // Always require delivery to be completed first
-        const reqDocs = (billingRule.requiredDocuments || '').toLowerCase();
-        const reqRefs = (billingRule.requiredReferences || '').toLowerCase();
+        const trigger = (billingRule.invoiceTrigger || 'Delivery completed').toLowerCase();
+        let triggerMet = false;
 
-        if (reqDocs.includes('pod') || reqDocs.includes('signature')) {
-           conditionsMet = conditionsMet && hasPod;
+        if (trigger.includes('creation')) {
+          triggerMet = true;
+        } else if (trigger.includes('pod') || trigger.includes('delivery')) {
+          triggerMet = isDelivered;
+        } else {
+          triggerMet = isDelivered;
         }
 
-        if (reqRefs.includes('po') || reqRefs.includes('purchase order')) {
-           const hasPo = load.notes?.toLowerCase().includes('po:') || load.loadRef?.toLowerCase().startsWith('po-') || (load.customerRef && load.customerRef.trim() !== '');
-           conditionsMet = conditionsMet && hasPo;
-        }
+        if (!triggerMet) {
+          isReady = false;
+        } else {
+          let conditionsMet = true;
+          const reqDocs = (billingRule.requiredDocuments || '').toLowerCase();
+          const reqRefs = (billingRule.requiredReferences || '').toLowerCase();
 
-        isReady = conditionsMet;
+          // Check POD Requirement
+          if (reqDocs.includes('pod') || reqDocs.includes('signature') || reqDocs.includes('receipt')) {
+            if (!hasPod) {
+              conditionsMet = false;
+              blockedReason = 'MISSING_POD';
+            }
+          }
+
+          // Check Weighbridge Docket
+          if (reqDocs.includes('weighbridge') || reqDocs.includes('docket')) {
+            const hasWeighbridge = load.documents && load.documents.some(d => (d.type || '').toUpperCase().includes('WEIGH') || (d.name || '').toUpperCase().includes('WEIGH'));
+            if (!hasWeighbridge) {
+              conditionsMet = false;
+              blockedReason = 'MISSING_WEIGHBRIDGE';
+            }
+          }
+
+          // Check Required Purchase Order / Reference
+          if (reqRefs.includes('po') || reqRefs.includes('purchase order')) {
+            const hasPo = load.notes?.toLowerCase().includes('po:') || load.loadRef?.toLowerCase().startsWith('po-') || (load.customerRef && load.customerRef.trim() !== '');
+            if (!hasPo) {
+              conditionsMet = false;
+              blockedReason = 'MISSING_PO_NUMBER';
+            }
+          }
+
+          // Check Approval Requirement
+          if (billingRule.approvalRequired) {
+            const isApproved = load.notes?.includes('[BILLING_APPROVED]') || load.billingStatus === 'APPROVED';
+            if (!isApproved) {
+              conditionsMet = false;
+              blockedReason = 'PENDING_APPROVAL';
+            }
+          }
+
+          isReady = conditionsMet;
+        }
       } else {
-        // Fallback default logic
+        // Fallback default logic: must be delivered and have POD
         isReady = isDelivered && hasPod;
+        if (isDelivered && !hasPod) blockedReason = 'MISSING_POD';
       }
 
-      const newStatus = isReady ? 'READY_TO_INVOICE' : 'NOT_READY';
-      
-      if (load.billingStatus !== newStatus) {
+      let newStatus = 'NOT_READY';
+      if (isReady) {
+        newStatus = 'READY_TO_INVOICE';
+      } else if (isDelivered && blockedReason) {
+        newStatus = 'BILLING_BLOCKED';
+      }
+
+      if (load.billingStatus !== newStatus && load.billingStatus !== 'INVOICED') {
         await prisma.load.update({
           where: { id: loadId },
           data: { billingStatus: newStatus }
         }).catch(() => {});
       }
-      
+
       return newStatus;
     } catch (err) {
       console.warn('Error evaluating billing status:', err?.message);

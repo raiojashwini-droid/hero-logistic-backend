@@ -541,22 +541,39 @@ exports.deleteRateCard = async (req, res, next) => {
 exports.getPricingProfiles = async (req, res, next) => {
   try {
     const data = await prisma.customerPricingProfile.findMany({
-      where: { customerId: req.params.id }
+      where: { customerId: req.params.id },
+      orderBy: { createdAt: 'desc' }
     });
-    // Map to frontend expected format
+    // Map to frontend expected format (includes all fields for auto-match pricing)
     const mapped = data.map(p => ({
       id: p.id,
       customerId: p.customerId,
       name: p.name || `${p.origin || ''} ➔ ${p.destination || ''}`,
+      niche: p.transportNiche || 'General Freight',
+      effectiveFrom: p.effectiveFrom || null,
+      effectiveTo: p.effectiveTo || null,
+      status: p.isActive ? 'Active' : 'Inactive',
       from: p.origin || '',
       to: p.destination || '',
+      zone: p.zone || '',
       method: p.calculationMethod || 'Per Load',
       baseRate: p.baseRate || 0,
+      minCharge: p.minimumCharge || 0,
       fuelLevy: p.fuelLevyPercent || 0,
+      additionalStopCharge: p.additionalStopCharge || 0,
+      waitingTimeCharge: p.waitingTimeCharge || 0,
+      storageCharge: p.storageCharge || 0,
+      tolls: p.tollsCharge || 0,
+      dgSurcharge: p.dgSurcharge || 0,
+      afterHoursCharge: p.afterHoursSurcharge || 0,
+      weekendCharge: p.weekendCharge || 0,
+      redeliveryCharge: p.redeliveryCharge || 0,
+      otherCharges: p.otherCharges || 0,
+      gstTreatment: p.gstTreatment || 'Excluding GST (Add 10%)',
+      // Legacy fields for backward compatibility
       description: p.name,
       rate: p.baseRate || 0,
       unit: p.calculationMethod || 'Per Load',
-      distance: null,
       type: p.transportNiche || 'Interstate',
       gstMode: 'EXC_GST'
     }));
@@ -566,18 +583,40 @@ exports.getPricingProfiles = async (req, res, next) => {
 
 exports.savePricingProfile = async (req, res, next) => {
   try {
-    const { id, name, from, to, method, baseRate, fuelLevy, description, rate, unit } = req.body;
+    const {
+      id, name, from, to, method, baseRate, fuelLevy, description, rate, unit,
+      transportNiche, effectiveFrom, effectiveTo, isActive, zone,
+      minCharge, additionalStopCharge, waitingTimeCharge, storageCharge,
+      tolls, dgSurcharge, afterHoursCharge, weekendCharge, redeliveryCharge,
+      otherCharges, gstTreatment
+    } = req.body;
     let result;
     
     // Convert from frontend schema
     const dataObj = {
       customerId: req.params.id,
       name: name || description || `${from} ➔ ${to}`,
-      origin: from,
-      destination: to,
-      calculationMethod: method || unit,
+      transportNiche: transportNiche || null,
+      effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : null,
+      effectiveTo: effectiveTo ? new Date(effectiveTo) : null,
+      isActive: isActive !== undefined ? Boolean(isActive) : true,
+      origin: from || null,
+      destination: to || null,
+      zone: zone || null,
+      calculationMethod: method || unit || 'Per Load',
       baseRate: parseFloat(baseRate) || parseFloat(rate) || 0,
-      fuelLevyPercent: parseFloat(fuelLevy) || 0
+      minimumCharge: parseFloat(minCharge) || null,
+      fuelLevyPercent: parseFloat(fuelLevy) || 0,
+      additionalStopCharge: parseFloat(additionalStopCharge) || null,
+      waitingTimeCharge: parseFloat(waitingTimeCharge) || null,
+      storageCharge: parseFloat(storageCharge) || null,
+      tollsCharge: parseFloat(tolls) || null,
+      dgSurcharge: parseFloat(dgSurcharge) || null,
+      afterHoursSurcharge: parseFloat(afterHoursCharge) || null,
+      weekendCharge: parseFloat(weekendCharge) || null,
+      redeliveryCharge: parseFloat(redeliveryCharge) || null,
+      otherCharges: parseFloat(otherCharges) || null,
+      gstTreatment: gstTreatment || null
     };
 
     if (id && id.length > 20) { // basic UUID check vs frontend timestamp
@@ -595,6 +634,59 @@ exports.savePricingProfile = async (req, res, next) => {
 };
 
 // --- DB-Backed Billing Rules ---
+
+exports.getSurcharges = async (req, res, next) => {
+  try {
+    const data = await prisma.customerPricingProfile.findMany({
+      where: { customerId: req.params.id }
+    });
+    const surcharges = [];
+    data.forEach(p => {
+      if (p.fuelLevyPercent && p.fuelLevyPercent > 0) {
+        surcharges.push({ id: `fuel_${p.id}`, description: `Fuel Levy (${p.name})`, calculation: '% of Base Rate', rate: String(p.fuelLevyPercent) });
+      }
+      if (p.tollsCharge && p.tollsCharge > 0) {
+        surcharges.push({ id: `tolls_${p.id}`, description: `Tolls Charge (${p.name})`, calculation: 'Flat Fee ($)', rate: String(p.tollsCharge) });
+      }
+      if (p.waitingTimeCharge && p.waitingTimeCharge > 0) {
+        surcharges.push({ id: `waiting_${p.id}`, description: `Waiting Time Charge (${p.name})`, calculation: 'Flat Fee ($)', rate: String(p.waitingTimeCharge) });
+      }
+      if (p.dgSurcharge && p.dgSurcharge > 0) {
+        surcharges.push({ id: `dg_${p.id}`, description: `DG Surcharge (${p.name})`, calculation: 'Flat Fee ($)', rate: String(p.dgSurcharge) });
+      }
+      if (p.otherCharges && p.otherCharges > 0) {
+        surcharges.push({ id: `other_${p.id}`, description: p.name || 'Other Surcharge', calculation: p.calculationMethod || 'Flat Fee ($)', rate: String(p.otherCharges) });
+      }
+    });
+    return sendSuccess(res, surcharges);
+  } catch (error) { next(error); }
+};
+
+exports.saveSurcharge = async (req, res, next) => {
+  try {
+    const { description, calculation, rate } = req.body;
+    const isPercent = (calculation || '').includes('%');
+    const numericRate = parseFloat(rate) || 0;
+    
+    const result = await prisma.customerPricingProfile.create({
+      data: {
+        customerId: req.params.id,
+        name: description || 'Surcharge',
+        calculationMethod: calculation || '% of Base Rate',
+        baseRate: isPercent ? 0 : numericRate,
+        fuelLevyPercent: isPercent ? numericRate : 0,
+        otherCharges: isPercent ? 0 : numericRate,
+        isActive: true
+      }
+    });
+    return sendSuccess(res, {
+      id: result.id,
+      description: result.name,
+      calculation: result.calculationMethod,
+      rate: String(numericRate)
+    });
+  } catch (error) { next(error); }
+};
 
 exports.getBillingRules = async (req, res, next) => {
   try {

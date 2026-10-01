@@ -535,7 +535,11 @@ exports.updateLoad = async (req, res, next) => {
     // P0: When transitioning to DELIVERED, COMPLETED, or FULFILLED, auto-credit payroll
     if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(payload.status) || ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status)) {
       try {
-        await exports.autoGenerateLoadInvoice(data.id, data.companyId);
+        const PricingService = require('../services/PricingService');
+        const billingStatus = await PricingService.evaluateBillingStatus(data.id);
+        if (billingStatus === 'READY_TO_INVOICE') {
+          await exports.autoGenerateLoadInvoice(data.id, data.companyId);
+        }
         if (data.driverId) {
           await exports.autoCreditDriverPayroll(data.id, data.driverId, data.companyId);
         }
@@ -1064,6 +1068,16 @@ exports.createLoadDocument = async (req, res, next) => {
         fileUrl
       }
     });
+
+    try {
+      const PricingService = require('../services/PricingService');
+      const newStatus = await PricingService.evaluateBillingStatus(targetLoad.id);
+      if (newStatus === 'READY_TO_INVOICE') {
+        await exports.autoGenerateLoadInvoice(targetLoad.id, targetLoad.companyId);
+      }
+    } catch (e) {
+      console.warn('Billing re-evaluation on document upload catch:', e?.message);
+    }
 
     const mapped = {
       id: document.id,
