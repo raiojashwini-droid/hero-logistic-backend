@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "prisma db push --accept-data-loss && node index.js",
     "dev": "nodemon index.js",
-    "postinstall": "prisma generate && prisma db push --accept-data-loss",
+    "postinstall": "prisma generate",
     "generate": "prisma generate",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
