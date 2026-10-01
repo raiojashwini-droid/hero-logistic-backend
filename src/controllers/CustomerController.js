@@ -613,7 +613,6 @@ exports.savePricingProfile = async (req, res, next) => {
       tollsCharge: parseFloat(tolls) || null,
       dgSurcharge: parseFloat(dgSurcharge) || null,
       afterHoursSurcharge: parseFloat(afterHoursCharge) || null,
-      weekendCharge: parseFloat(weekendCharge) || null,
       redeliveryCharge: parseFloat(redeliveryCharge) || null,
       otherCharges: parseFloat(otherCharges) || null,
       gstTreatment: gstTreatment || null
