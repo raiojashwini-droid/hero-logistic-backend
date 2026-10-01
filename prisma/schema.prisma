@@ -569,7 +569,7 @@ model Company {
   registrationNumber String?
   dotNumber          String?
   taxId              String?
-  defaultTaxRate     Float         @default(0.10)
+  defaultTaxRate     Float   @default(0.10)
   adminEmail         String?
   cardBrand          String? // e.g., "Visa"
   cardLast4          String? // e.g., "8812"
@@ -864,7 +864,7 @@ model Driver {
   postalCode       String?
 
   // 2. Employment Information
-  status         DriverStatus   @default(AVAILABLE)
+  status         DriverStatus    @default(AVAILABLE)
   employmentType EmploymentType?
   role           String? // e.g., "Driver"
   category       String? // e.g., "Heavy Rig"
@@ -893,11 +893,11 @@ model Driver {
   hvCertified     Boolean   @default(false) // Heavy Vehicle
 
   // 5. Payroll Information
-  payType             String?   // e.g., "Daily", "Hourly", "Per Load", "Per Km"
-  payRate             Float?    // e.g., 350.00
+  payType             String? // e.g., "Daily", "Hourly", "Per Load", "Per Km"
+  payRate             Float? // e.g., 350.00
   ordinaryHoursPerDay Float?    @default(7.6)
   overtimeStartsAfter Float?    @default(7.6)
-  overtimeRate        Float?    // Direct overtime rate per hour (Primary)
+  overtimeRate        Float? // Direct overtime rate per hour (Primary)
   overtimeMultiplier  Float?    @default(1.5) // Optional / Fallback multiplier
   defaultBreakMinutes Int?      @default(30) // Default unpaid break duration in minutes
   tfnStatus           String?   @default("Provided") // "Provided", "Exempt", "Pending", "Not Provided"
@@ -912,9 +912,9 @@ model Driver {
   loadPaySchedule     String?   @db.Text // JSON array of named per-load rate choices
   bankName            String?
   accountNumber       String?
-  routingNumber       String?   // BSB
-  taxNumber           String?   // TFN/ABN
-  superFund           String?   // e.g., "AustralianSuper"
+  routingNumber       String? // BSB
+  taxNumber           String? // TFN/ABN
+  superFund           String? // e.g., "AustralianSuper"
 
   // 6. Availability & Preferences
   availableFrom    DateTime?
@@ -1245,8 +1245,8 @@ model Load {
 
   // Pricing Snapshot & Audit Trail (Immutable Load Charges)
   pricingSnapshot    Json? // Stores { rateCardId, method, baseRate, quantity, fuelLevyPercent, fuelLevyAmount, totalExGst, gst, totalIncGst, snapshotDate }
-  pricingStatus      String   @default("AUTO_CALCULATED") // AUTO_CALCULATED, OVERRIDDEN
-  billingStatus      String   @default("NOT_READY") // NOT_READY, READY_TO_INVOICE, INVOICED
+  pricingStatus      String @default("AUTO_CALCULATED") // AUTO_CALCULATED, OVERRIDDEN
+  billingStatus      String @default("NOT_READY") // NOT_READY, READY_TO_INVOICE, INVOICED
   priceOverrideAudit Json? // Stores audit log array of price overrides
 
   companyId String
@@ -1657,8 +1657,8 @@ model Customer {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
-  pricingProfiles  CustomerPricingProfile[]
-  billingRules     CustomerBillingRule[]
+  pricingProfiles CustomerPricingProfile[]
+  billingRules    CustomerBillingRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1667,37 +1667,37 @@ model Customer {
 }
 
 model CustomerPricingProfile {
-  id               String   @id @default(uuid())
-  customerId       String
-  customer         Customer @relation(fields: [customerId], references: [id])
-  name             String   // e.g. ABC Motors NSW Rate Card
-  transportNiche   String?
-  effectiveFrom    DateTime?
-  effectiveTo      DateTime?
-  origin           String?
-  destination      String?
-  zone             String?
-  serviceType      String?
-  freightType      String?
-  calculationMethod String? // Per Load, Per Item, Per km, etc.
-  minimumCharge    Float?
-  baseRate         Float?
-  fuelLevyPercent  Float?
+  id                   String    @id @default(uuid())
+  customerId           String
+  customer             Customer  @relation(fields: [customerId], references: [id])
+  name                 String // e.g. ABC Motors NSW Rate Card
+  transportNiche       String?
+  effectiveFrom        DateTime?
+  effectiveTo          DateTime?
+  origin               String?
+  destination          String?
+  zone                 String?
+  serviceType          String?
+  freightType          String?
+  calculationMethod    String? // Per Load, Per Item, Per km, etc.
+  minimumCharge        Float?
+  baseRate             Float?
+  fuelLevyPercent      Float?
   additionalStopCharge Float?
-  waitingTimeCharge Float?
-  storageCharge    Float?
-  tollsCharge      Float?
-  dgSurcharge      Float?
-  afterHoursSurcharge Float?
-  redeliveryCharge Float?
-  otherCharges     Float?
-  gstTreatment     String?
-  autoCalculation  Boolean  @default(true)
-  priority         Int      @default(1)
-  version          Int      @default(1)
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  waitingTimeCharge    Float?
+  storageCharge        Float?
+  tollsCharge          Float?
+  dgSurcharge          Float?
+  afterHoursSurcharge  Float?
+  redeliveryCharge     Float?
+  otherCharges         Float?
+  gstTreatment         String?
+  autoCalculation      Boolean   @default(true)
+  priority             Int       @default(1)
+  version              Int       @default(1)
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@map("customer_pricing_profile")
 }
@@ -1706,14 +1706,14 @@ model CustomerBillingRule {
   id                 String   @id @default(uuid())
   customerId         String
   customer           Customer @relation(fields: [customerId], references: [id])
-  name               String   // e.g. ABC Motors Standard Billing
-  invoiceTrigger     String?  // Delivery completed, All items delivered, POD received
-  invoiceFrequency   String?  
-  invoiceGrouping    String?  // Per load, Per item, Daily, Weekly
-  invoiceRecipient   String?  
+  name               String // e.g. ABC Motors Standard Billing
+  invoiceTrigger     String? // Delivery completed, All items delivered, POD received
+  invoiceFrequency   String?
+  invoiceGrouping    String? // Per load, Per item, Daily, Weekly
+  invoiceRecipient   String?
   paymentTerms       String?
-  requiredReferences String?  // e.g. PO number
-  requiredDocuments  String?  // e.g. POD
+  requiredReferences String? // e.g. PO number
+  requiredDocuments  String? // e.g. POD
   approvalRequired   Boolean  @default(false)
   autoCreateInvoice  Boolean  @default(true)
   autoSendInvoice    Boolean  @default(true)
@@ -2078,7 +2078,7 @@ model LoadItem {
   vehicleType     String?
   keys            Boolean @default(true)
   damageReportReq Boolean @default(false)
-  
+
   // General Freight Fields
   pallets         Int?
   cubicMetres     Float?
@@ -2096,7 +2096,7 @@ model LoadItem {
   complianceChecklist Boolean @default(false)
   placarding          Boolean @default(false)
 
-  notes           String? @db.Text
+  notes String? @db.Text
 
   aiConfidence Float? // e.g., 94.0 for High confidence
 
@@ -2212,11 +2212,11 @@ model CustomerInvoice {
   amount         Float
   appliedTaxRate Float                 @default(0.10)
   status         CustomerInvoiceStatus @default(DRAFT)
-  dueDate DateTime?
-  pdfUrl  String?
-  notes   String?               @db.Text
-  items   Json?
-  type    String?               @default("Freight")
+  dueDate        DateTime?
+  pdfUrl         String?
+  notes          String?               @db.Text
+  items          Json?
+  type           String?               @default("Freight")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2226,11 +2226,11 @@ model CustomerInvoice {
 
 // WMS & Assets models
 model Warehouse {
-  id     String @id @default(uuid())
-  code   String @unique // e.g., WH-001
-  name   String
-  type   String @default("General")
-  status String @default("Active")
+  id       String  @id @default(uuid())
+  code     String  @unique // e.g., WH-001
+  name     String
+  type     String  @default("General")
+  status   String  @default("Active")
   photoUrl String? @db.Text
 
   // Sizing & Capabilities
@@ -3078,7 +3078,6 @@ model PlatformSetting {
 
   @@map("platform_setting")
 }
-
 
 model CompanyStorageAudit {
   id         String   @id @default(uuid())
