@@ -188,6 +188,12 @@ router.get('/customers/:id/surcharges', CustomerController.getSurcharges);
 router.post('/customers/:id/surcharges', CustomerController.saveSurcharge);
 router.get('/customers/:id/billing-rules', CustomerController.getBillingRules);
 router.post('/customers/:id/billing-rules', CustomerController.saveBillingRule);
+router.get('/customers/:id/rate-cards', CustomerController.getRateCards);
+router.post('/customers/:id/rate-cards', CustomerController.addRateCard);
+router.put('/customers/:id/rate-cards/:cardId', CustomerController.updateRateCard);
+router.delete('/customers/:id/rate-cards/:cardId', CustomerController.deleteRateCard);
+router.get('/customers/:id/contacts', CustomerController.getContacts);
+router.post('/customers/:id/contacts', CustomerController.addContact);
 
 // 21. Subscription & Billing
 router.get('/subscription-billing', ctrl.getSubscriptionBilling);
