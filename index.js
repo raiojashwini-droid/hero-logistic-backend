@@ -20,7 +20,7 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'bypass-tunnel-reminder', 'x-requested-with', 'Accept']
 };
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options(/.*$/, cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
