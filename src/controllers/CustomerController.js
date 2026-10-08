@@ -698,32 +698,64 @@ exports.getBillingRules = async (req, res, next) => {
 
 exports.saveBillingRule = async (req, res, next) => {
   try {
-    const { id, name, invoiceTrigger, invoiceGrouping, paymentTerms, requiredReferences, requiredDocuments, autoCreateInvoice, autoSendInvoice, approvalRequired } = req.body;
+    const { 
+      id, name, invoiceTrigger, invoiceGrouping, paymentTerms, 
+      requiredReferences, requiredDocuments, 
+      autoCreateInvoice, autoSendInvoice, approvalRequired,
+      podRequired, customerPoRequired, includeJobPhotos, requireManualApproval
+    } = req.body;
     let result;
 
     const dataObj = {
       customerId: req.params.id,
       name: name || 'Standard Billing Rule',
-      invoiceTrigger,
-      invoiceGrouping,
-      paymentTerms,
+      invoiceTrigger: invoiceTrigger || 'Delivery completed',
+      invoiceGrouping: invoiceGrouping || 'Per load',
+      paymentTerms: paymentTerms || 'Due immediately',
       requiredReferences,
       requiredDocuments,
-      autoCreateInvoice: Boolean(autoCreateInvoice),
-      autoSendInvoice: Boolean(autoSendInvoice),
-      approvalRequired: Boolean(approvalRequired)
+      autoCreateInvoice: autoCreateInvoice !== undefined ? Boolean(autoCreateInvoice) : true,
+      autoSendInvoice: autoSendInvoice !== undefined ? Boolean(autoSendInvoice) : false,
+      approvalRequired: approvalRequired !== undefined ? Boolean(approvalRequired) : Boolean(requireManualApproval),
+      requireManualApproval: requireManualApproval !== undefined ? Boolean(requireManualApproval) : Boolean(approvalRequired),
+      podRequired: podRequired !== undefined ? Boolean(podRequired) : true,
+      customerPoRequired: customerPoRequired !== undefined ? Boolean(customerPoRequired) : false,
+      includeJobPhotos: includeJobPhotos !== undefined ? Boolean(includeJobPhotos) : false,
     };
 
     if (id && id.length > 20) {
+       // Update by ID
        result = await prisma.customerBillingRule.update({
          where: { id },
          data: dataObj
        });
     } else {
-       result = await prisma.customerBillingRule.create({
-         data: dataObj
+       // Upsert: if a rule already exists for this customer, update it; otherwise create
+       const existing = await prisma.customerBillingRule.findFirst({
+         where: { customerId: req.params.id }
        });
+       if (existing) {
+         result = await prisma.customerBillingRule.update({
+           where: { id: existing.id },
+           data: dataObj
+         });
+       } else {
+         result = await prisma.customerBillingRule.create({
+           data: dataObj
+         });
+       }
     }
+
+    // Also sync paymentTerms to Customer model for display
+    if (paymentTerms) {
+      await prisma.customer.update({
+        where: { id: req.params.id },
+        data: { billingTerms: paymentTerms }
+      }).catch(() => {});
+    }
+
     return sendSuccess(res, result);
   } catch (error) { next(error); }
 };
+
+

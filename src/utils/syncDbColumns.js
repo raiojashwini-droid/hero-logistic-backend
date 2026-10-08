@@ -47,6 +47,10 @@ async function syncMissingVehicleColumns() {
       `ALTER TABLE \`load\` ADD COLUMN pricingStatus VARCHAR(255) DEFAULT 'AUTO_CALCULATED'`,
       `ALTER TABLE \`load\` ADD COLUMN billingStatus VARCHAR(255) DEFAULT 'NOT_READY'`,
       `ALTER TABLE \`load\` ADD COLUMN priceOverrideAudit JSON`,
+      `ALTER TABLE customer_billing_rule ADD COLUMN podRequired TINYINT(1) NOT NULL DEFAULT 1`,
+      `ALTER TABLE customer_billing_rule ADD COLUMN customerPoRequired TINYINT(1) NOT NULL DEFAULT 0`,
+      `ALTER TABLE customer_billing_rule ADD COLUMN includeJobPhotos TINYINT(1) NOT NULL DEFAULT 0`,
+      `ALTER TABLE customer_billing_rule ADD COLUMN requireManualApproval TINYINT(1) NOT NULL DEFAULT 0`,
       `CREATE TABLE IF NOT EXISTS platform_setting (
         id VARCHAR(255) PRIMARY KEY,
         defaultCurrency VARCHAR(50) NOT NULL DEFAULT 'USD',

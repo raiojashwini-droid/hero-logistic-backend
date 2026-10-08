@@ -1212,6 +1212,7 @@ model Load {
 
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
+  billedCustomers Customer[] @relation("LoadBilledCustomers")
 
   driverId String?
   driver   Driver? @relation(fields: [driverId], references: [id])
@@ -1651,6 +1652,7 @@ model Customer {
   accountManagerId String?
   accountManager   User?             @relation("AccountManager", fields: [accountManagerId], references: [id])
   loads            Load[]
+  billedLoads      Load[] @relation("LoadBilledCustomers")
   loadItems        LoadItem[]
   invoices         CustomerInvoice[]
 
@@ -1714,6 +1716,10 @@ model CustomerBillingRule {
   paymentTerms       String?
   requiredReferences String? // e.g. PO number
   requiredDocuments  String? // e.g. POD
+  podRequired        Boolean  @default(true)
+  customerPoRequired Boolean  @default(false)
+  includeJobPhotos   Boolean  @default(false)
+  requireManualApproval Boolean @default(false)
   approvalRequired   Boolean  @default(false)
   autoCreateInvoice  Boolean  @default(true)
   autoSendInvoice    Boolean  @default(true)
@@ -2206,7 +2212,7 @@ model CustomerInvoice {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
-  loadId String? @unique
+  loadId String?
   load   Load?   @relation(fields: [loadId], references: [id])
 
   amount         Float

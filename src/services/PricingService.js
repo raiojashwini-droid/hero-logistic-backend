@@ -259,28 +259,19 @@ class PricingService {
           isReady = false;
         } else {
           let conditionsMet = true;
-          const reqDocs = (billingRule.requiredDocuments || '').toLowerCase();
-          const reqRefs = (billingRule.requiredReferences || '').toLowerCase();
 
-          // Check POD Requirement
-          if (reqDocs.includes('pod') || reqDocs.includes('signature') || reqDocs.includes('receipt')) {
+          // Check strict UI boolean toggles for Billing Rules
+          
+          // 1. POD Required
+          if (billingRule.podRequired) {
             if (!hasPod) {
               conditionsMet = false;
               blockedReason = 'MISSING_POD';
             }
           }
 
-          // Check Weighbridge Docket
-          if (reqDocs.includes('weighbridge') || reqDocs.includes('docket')) {
-            const hasWeighbridge = load.documents && load.documents.some(d => (d.type || '').toUpperCase().includes('WEIGH') || (d.name || '').toUpperCase().includes('WEIGH'));
-            if (!hasWeighbridge) {
-              conditionsMet = false;
-              blockedReason = 'MISSING_WEIGHBRIDGE';
-            }
-          }
-
-          // Check Required Purchase Order / Reference
-          if (reqRefs.includes('po') || reqRefs.includes('purchase order')) {
+          // 2. Customer PO Required
+          if (billingRule.customerPoRequired) {
             const hasPo = load.notes?.toLowerCase().includes('po:') || load.loadRef?.toLowerCase().startsWith('po-') || (load.customerRef && load.customerRef.trim() !== '');
             if (!hasPo) {
               conditionsMet = false;
@@ -288,8 +279,20 @@ class PricingService {
             }
           }
 
-          // Check Approval Requirement
-          if (billingRule.approvalRequired) {
+          // 3. Include Job Photos
+          if (billingRule.includeJobPhotos) {
+            const hasPhotos = load.documents && load.documents.some(d => (d.type || '').toUpperCase().includes('PHOTO') || (d.name || '').toUpperCase().includes('PHOTO') || d.url?.match(/.(jpeg|jpg|gif|png)$/i) != null);
+            if (!hasPhotos) {
+              // Note: If photos are missing, we just don't attach them to the invoice, or we can block it.
+              // For strictness, if they require job photos and none exist, we might block it.
+              // We'll block it to enforce the rule.
+              conditionsMet = false;
+              blockedReason = 'MISSING_JOB_PHOTOS';
+            }
+          }
+
+          // 4. Manual Approval Required
+          if (billingRule.requireManualApproval || billingRule.approvalRequired) {
             const isApproved = load.notes?.includes('[BILLING_APPROVED]') || load.billingStatus === 'APPROVED';
             if (!isApproved) {
               conditionsMet = false;

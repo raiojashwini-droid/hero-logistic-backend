@@ -112,7 +112,10 @@ const ALLOWED_LOAD_FIELDS = new Set([
   'vinScanEvents',
   'deliveryPods',
   'preStartChecklists',
-  'incidents'
+  'incidents',
+  'pricingSnapshot',
+  'pricingStatus',
+  'billingStatus'
 ]);
 
 const cleanLoadPayload = (rawPayload) => {
@@ -310,6 +313,15 @@ exports.createLoad = async (req, res, next) => {
     if (!payload.trailerId) delete payload.trailerId;
     if (!payload.branchId) delete payload.branchId;
 
+    if (billedCustomerIds.length > 0) {
+      if (!payload.customerId) {
+        payload.customerId = billedCustomerIds[0];
+      }
+      payload.billedCustomers = {
+        connect: billedCustomerIds.map(id => ({ id }))
+      };
+    }
+
     if (payload.documents && (!payload.documents.create || payload.documents.create.length === 0)) {
       delete payload.documents;
     }
@@ -346,9 +358,15 @@ exports.createLoad = async (req, res, next) => {
           color: item.colour || item.color || null,
           quantity: item.quantity ? parseInt(String(item.quantity).replace(/[^0-9]/g, ''), 10) || 1 : 1,
           weightKg: item.weightValue || (item.weight ? parseInt(String(item.weight).replace(/[^0-9]/g, ''), 10) || 0 : 0),
+          customerId: item.customerId || null,
           notes: typeof item.notes === 'string' ? item.notes : (item.details || JSON.stringify(item))
         }))
       };
+    }
+
+    if (payload.billingSnapshots) {
+      payload.pricingSnapshot = payload.billingSnapshots;
+      delete payload.billingSnapshots;
     }
 
     const cleanedData = cleanLoadPayload(payload);
@@ -698,6 +716,10 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
 
     if (billingRule && !billingRule.autoCreateInvoice) {
        return null; // Auto-invoicing disabled for this customer
+    }
+
+    if (billingRule && (billingRule.requireManualApproval || billingRule.approvalRequired)) {
+       return null; // Requires Accounts Manual Approval - do not auto generate!
     }
 
     if (billingRule && ['weekly', 'monthly', 'fortnightly'].includes((billingRule.invoiceGrouping || '').toLowerCase())) {

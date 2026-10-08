@@ -699,7 +699,7 @@ exports.getPlanningBoard = async (req, res, next) => {
       const mappedLoads = driverLoads.map((l, lIndex) => {
         const startTime = 8 + (lIndex * 5);
         const endTime = startTime + 4;
-        let routeStr = 'Melbourne VIC → Sydney NSW';
+        let routeStr = 'Route Not Specified';
         if (Array.isArray(l.stops) && l.stops.length > 0) {
           const sorted = [...l.stops].sort((a, b) => (a.sequenceIndex || 0) - (b.sequenceIndex || 0));
           const p = sorted[0]?.address || 'Origin';
@@ -746,7 +746,7 @@ exports.getPlanningBoard = async (req, res, next) => {
     const unassignedLoads = dbLoads
       .filter(l => !l.driverId)
       .map(l => {
-        let routeStr = 'Melbourne VIC → Sydney NSW';
+        let routeStr = 'Route Not Specified';
         if (Array.isArray(l.stops) && l.stops.length > 0) {
           const sorted = [...l.stops].sort((a, b) => (a.sequenceIndex || 0) - (b.sequenceIndex || 0));
           const p = sorted[0]?.address || 'Origin';
@@ -825,16 +825,16 @@ exports.getActiveLoads = async (req, res, next) => {
     const formattedLoads = dbLoads.map((dbLoad, idx) => {
       const loadRefStr = dbLoad.loadRef || (dbLoad.id && dbLoad.id.length > 18 ? `LD-${dbLoad.id.slice(0, 8).toUpperCase()}` : dbLoad.id);
 
-      let routeFromStr = 'Melbourne VIC';
-      let routeToStr = 'Sydney NSW';
+      let routeFromStr = 'Origin Not Specified';
+      let routeToStr = 'Destination Not Specified';
       if (Array.isArray(dbLoad.stops) && dbLoad.stops.length > 0) {
         const sortedStops = [...dbLoad.stops].sort((a, b) => (a.sequenceIndex || 0) - (b.sequenceIndex || 0));
-        routeFromStr = sortedStops[0]?.address || sortedStops[0]?.location || 'Melbourne VIC';
-        routeToStr = sortedStops[sortedStops.length - 1]?.address || sortedStops[sortedStops.length - 1]?.location || 'Sydney NSW';
+        routeFromStr = sortedStops[0]?.address || sortedStops[0]?.location || 'Origin Not Specified';
+        routeToStr = sortedStops[sortedStops.length - 1]?.address || sortedStops[sortedStops.length - 1]?.location || 'Destination Not Specified';
       } else if (dbLoad.notes && dbLoad.notes.includes(' to ')) {
         const parts = dbLoad.notes.split(' to ');
-        routeFromStr = parts[0] || 'Melbourne VIC';
-        routeToStr = parts[1] || 'Sydney NSW';
+        routeFromStr = parts[0] || 'Origin Not Specified';
+        routeToStr = parts[1] || 'Destination Not Specified';
       }
 
       let computedDots = 1;
