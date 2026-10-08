@@ -176,7 +176,7 @@ exports.createLoad = async (req, res, next) => {
     if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
       return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required to create loads' }, HTTP_STATUS.FORBIDDEN);
     }
-    const { stops, items, ...rawPayload } = req.body;
+    const { stops, items, billedCustomerIds, ...rawPayload } = req.body;
     const payload = { ...rawPayload };
     payload.companyId = companyId;
 
@@ -313,12 +313,17 @@ exports.createLoad = async (req, res, next) => {
     if (!payload.trailerId) delete payload.trailerId;
     if (!payload.branchId) delete payload.branchId;
 
-    if (billedCustomerIds.length > 0) {
+    const billedIdsArray = Array.isArray(billedCustomerIds) 
+      ? billedCustomerIds 
+      : (Array.isArray(payload.billedCustomerIds) ? payload.billedCustomerIds : []);
+    delete payload.billedCustomerIds;
+
+    if (billedIdsArray.length > 0) {
       if (!payload.customerId) {
-        payload.customerId = billedCustomerIds[0];
+        payload.customerId = billedIdsArray[0];
       }
       payload.billedCustomers = {
-        connect: billedCustomerIds.map(id => ({ id }))
+        connect: billedIdsArray.map(id => ({ id }))
       };
     }
 
@@ -367,6 +372,26 @@ exports.createLoad = async (req, res, next) => {
     if (payload.billingSnapshots) {
       payload.pricingSnapshot = payload.billingSnapshots;
       delete payload.billingSnapshots;
+    }
+
+    if (!payload.pricingSnapshot && payload.customerId) {
+      try {
+        const PricingService = require('../services/PricingService');
+        const snapshot = await PricingService.buildLoadPricingSnapshot({
+          customerId: payload.customerId,
+          type: payload.type,
+          items: Array.isArray(items) ? items : [],
+          stops: Array.isArray(stops) ? stops : [],
+          agreedRate,
+          companyId: payload.companyId,
+          user: req.user
+        });
+        payload.pricingSnapshot = snapshot;
+        payload.pricingStatus = 'AUTO_CALCULATED';
+        payload.billingStatus = 'NOT_READY';
+      } catch (snapErr) {
+        console.warn('Load pricing snapshot auto-build warning:', snapErr?.message);
+      }
     }
 
     const cleanedData = cleanLoadPayload(payload);
@@ -754,8 +779,15 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
 
     // 4. Rate / Amount Calculation
     let amount = customAmount ? parseFloat(customAmount) : 0;
+    let snap = null;
+    if (targetLoad.pricingSnapshot) {
+      snap = typeof targetLoad.pricingSnapshot === 'string' ? JSON.parse(targetLoad.pricingSnapshot) : targetLoad.pricingSnapshot;
+    }
+
     if (!amount || amount === 0) {
-      if (targetLoad.notes && targetLoad.notes.includes('[AGREED_RATE:')) {
+      if (snap && (snap.totalIncGst || snap.totalExGst)) {
+        amount = snap.totalIncGst || snap.totalExGst;
+      } else if (targetLoad.notes && targetLoad.notes.includes('[AGREED_RATE:')) {
         const match = targetLoad.notes.match(/\[AGREED_RATE:([0-9.]+)/);
         if (match && match[1]) amount = parseFloat(match[1]);
       }
@@ -764,6 +796,53 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
       const itemsCount = targetLoad.items?.length || 1;
       amount = itemsCount * 350.00;
       if (amount < 500) amount = 1250.00;
+    }
+
+    // Build line items from snapshot if available
+    let invoiceItems = [];
+    if (snap && snap.baseCharge) {
+      const baseSub = Math.round((snap.baseCharge || (amount / 1.1)) * 100) / 100;
+      invoiceItems.push({
+        desc: `Linehaul Freight Base Rate (${snap.pricingMethod || 'Per Load'})`,
+        qty: snap.quantity || 1,
+        rate: snap.unitPrice || baseSub,
+        amount: baseSub,
+        gst: Math.round((baseSub * 0.10) * 100) / 100,
+        total: Math.round((baseSub * 1.10) * 100) / 100
+      });
+      if (snap.fuelLevyAmount && snap.fuelLevyAmount > 0) {
+        const fuelGst = Math.round((snap.fuelLevyAmount * 0.10) * 100) / 100;
+        invoiceItems.push({
+          desc: `Fuel Levy Surcharge (${snap.fuelLevyPercent || 0}%)`,
+          qty: 1,
+          rate: snap.fuelLevyAmount,
+          amount: snap.fuelLevyAmount,
+          gst: fuelGst,
+          total: Math.round((snap.fuelLevyAmount + fuelGst) * 100) / 100
+        });
+      }
+      if (snap.surchargesTotal && snap.surchargesTotal > 0) {
+        const surGst = Math.round((snap.surchargesTotal * 0.10) * 100) / 100;
+        invoiceItems.push({
+          desc: `Applicable Accessorial Surcharges (Tolls / Stops / DG)`,
+          qty: 1,
+          rate: snap.surchargesTotal,
+          amount: snap.surchargesTotal,
+          gst: surGst,
+          total: Math.round((snap.surchargesTotal + surGst) * 100) / 100
+        });
+      }
+    } else {
+      const sub = Math.round((amount / 1.10) * 100) / 100;
+      const gstAmt = Math.round((amount - sub) * 100) / 100;
+      invoiceItems.push({
+        desc: `Freight Transport Services - Load ${targetLoad.loadRef || targetLoad.id}`,
+        qty: 1,
+        rate: sub,
+        amount: sub,
+        gst: gstAmt,
+        total: amount
+      });
     }
 
     // 5. Generate Invoice Number & Due Date (14 Days)
@@ -780,6 +859,9 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
         customerId,
         loadId: targetLoad.id,
         amount,
+        appliedTaxRate: snap?.gstPercent === 0 ? 0 : 0.10,
+        items: invoiceItems,
+        type: 'Freight',
         status: 'DRAFT',
         dueDate,
         notes: `Auto-generated draft invoice upon POD delivery confirmation for Load ${targetLoad.loadRef || targetLoad.id}`
