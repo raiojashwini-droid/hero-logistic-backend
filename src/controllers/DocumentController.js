@@ -22,9 +22,9 @@ exports.getAll = async (req, res, next) => {
         OR: [
           { driver: { companyId } },
           { vehicle: { companyId } },
-          { asset: { companyId } },
+          { asset: { branch: { companyId } } },
           { load: { companyId } },
-          { warehouse: { companyId } }
+          { warehouse: { branch: { companyId } } }
         ]
       };
 
@@ -87,9 +87,9 @@ exports.getById = async (req, res, next) => {
           OR: [
             { driver: { companyId } },
             { vehicle: { companyId } },
-            { asset: { companyId } },
+            { asset: { branch: { companyId } } },
             { load: { companyId } },
-            { warehouse: { companyId } }
+            { warehouse: { branch: { companyId } } }
           ]
         }
       ];
@@ -151,9 +151,9 @@ exports.update = async (req, res, next) => {
           OR: [
             { driver: { companyId } },
             { vehicle: { companyId } },
-            { asset: { companyId } },
+            { asset: { branch: { companyId } } },
             { load: { companyId } },
-            { warehouse: { companyId } }
+            { warehouse: { branch: { companyId } } }
           ]
         }
       ];
@@ -188,9 +188,9 @@ exports.delete = async (req, res, next) => {
           OR: [
             { driver: { companyId } },
             { vehicle: { companyId } },
-            { asset: { companyId } },
+            { asset: { branch: { companyId } } },
             { load: { companyId } },
-            { warehouse: { companyId } }
+            { warehouse: { branch: { companyId } } }
           ]
         }
       ];
