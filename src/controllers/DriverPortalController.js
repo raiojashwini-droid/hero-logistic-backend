@@ -212,14 +212,7 @@ exports.updateStatus = async (req, res, next) => {
     let targetLoadId = loadId;
 
     if (!targetLoadId) {
-      const activeLoad = await prisma.load.findFirst({
-        where: {
-          driverId: driver.id,
-          status: { in: ['ASSIGNED', 'IN_TRANSIT', 'DISPATCHED', 'ACTIVE', 'PENDING'] }
-        },
-        orderBy: { createdAt: 'desc' }
-      }).catch(() => null);
-      if (activeLoad) targetLoadId = activeLoad.id;
+      return sendError(res, { code: 'VALIDATION_ERROR', message: 'Load ID is strictly required to update status for Multiple Independent Loads.' }, 400);
     }
 
     let updatedLoad = null;
@@ -231,6 +224,22 @@ exports.updateStatus = async (req, res, next) => {
       if (cleanStatus.includes('DELIVER')) dbStatus = 'DELIVERED';
       else if (cleanStatus.includes('TRANSIT')) dbStatus = 'IN_TRANSIT';
       else if (cleanStatus.includes('DISPATCH')) dbStatus = 'DISPATCHED';
+
+      // 1. Document Expiry Check (Step 4)
+      if (dbStatus === 'IN_TRANSIT' || dbStatus === 'DISPATCHED') {
+        if (driver.licenseExpiry && new Date(driver.licenseExpiry) < new Date()) {
+           return sendError(res, { code: 'FORBIDDEN', message: 'Cannot start job: Your Driver License has expired. Please upload a valid document to proceed.' }, 403);
+        }
+      }
+
+      const currentLoad = await prisma.load.findUnique({ where: { id: targetLoadId } });
+      if (!currentLoad) return sendError(res, { code: 'NOT_FOUND', message: 'Load not found' }, 404);
+
+      // 2. Prevent Backward Status Transitions (Step 4)
+      const lockedStatuses = ['DELIVERED', 'COMPLETED', 'CLOSED'];
+      if (lockedStatuses.includes(currentLoad.status) && !lockedStatuses.includes(dbStatus)) {
+         return sendError(res, { code: 'FORBIDDEN', message: 'Cannot revert status. This load has already been completed.' }, 403);
+      }
 
       updatedLoad = await prisma.load.update({
         where: { id: targetLoadId },
@@ -1609,15 +1618,8 @@ exports.confirmDeliveryPOD = async (req, res, next) => {
       return sendError(res, { code: 'VALIDATION_ERROR', message: 'Proof of Delivery (Signature or Photo) is required to complete this job.' }, 400);
     }
 
-    if (!targetLoadId && driver) {
-      const activeLoad = await prisma.load.findFirst({
-        where: {
-          driverId: driver.id,
-          status: { in: ['ASSIGNED', 'IN_TRANSIT', 'DISPATCHED', 'ACTIVE', 'PENDING'] }
-        },
-        orderBy: { createdAt: 'desc' }
-      }).catch(() => null);
-      if (activeLoad) targetLoadId = activeLoad.id;
+    if (!targetLoadId) {
+      return sendError(res, { code: 'VALIDATION_ERROR', message: 'Load ID is strictly required to confirm delivery for Multiple Independent Loads.' }, 400);
     }
 
     const signaturePath = signature ? saveBase64Image(signature, 'signatures') : null;
@@ -1904,31 +1906,7 @@ exports.addExpense = async (req, res, next) => {
     }
 
     if (!activeLoadId) {
-      const activeLoad = await prisma.load.findFirst({
-        where: {
-          OR: [
-            { driverId: driver.id },
-            { status: { in: ['ASSIGNED', 'IN_TRANSIT', 'DISPATCHED', 'ACTIVE', 'PENDING'] } }
-          ]
-        },
-        orderBy: { createdAt: 'desc' }
-      }).catch(() => null);
-      if (activeLoad) activeLoadId = activeLoad.id;
-    }
-
-    if (!activeLoadId && prisma.company) {
-      const comp = await prisma.company.findFirst().catch(() => null);
-      if (comp && prisma.load) {
-        const newLoad = await prisma.load.create({
-          data: {
-            loadRef: 'LD-EXPENSE-01',
-            companyId: comp.id,
-            driverId: driver.id,
-            status: 'ACTIVE'
-          }
-        }).catch(() => null);
-        if (newLoad) activeLoadId = newLoad.id;
-      }
+      return sendError(res, { code: 'VALIDATION_ERROR', message: 'Load ID is strictly required to add expenses for Multiple Independent Loads.' }, 400);
     }
 
     const compId = driver.companyId || req.tenantId;

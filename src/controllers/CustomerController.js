@@ -612,7 +612,8 @@ exports.getPricingProfiles = async (req, res, next) => {
       baseRate: p.baseRate || 0,
       minCharge: p.minimumCharge || 0,
       fuelLevy: p.fuelLevyPercent || 0,
-      additionalStopCharge: p.additionalStopCharge || 0,
+      extraPickupCharge: p.extraPickupCharge || 0,
+      extraDeliveryCharge: p.extraDeliveryCharge || 0,
       waitingTimeCharge: p.waitingTimeCharge || 0,
       storageCharge: p.storageCharge || 0,
       tolls: p.tollsCharge || 0,
@@ -638,7 +639,7 @@ exports.savePricingProfile = async (req, res, next) => {
     const {
       id, name, from, to, method, baseRate, fuelLevy, description, rate, unit,
       transportNiche, effectiveFrom, effectiveTo, isActive, zone,
-      minCharge, additionalStopCharge, waitingTimeCharge, storageCharge,
+      minCharge, extraPickupCharge, extraDeliveryCharge, waitingTimeCharge, storageCharge,
       tolls, dgSurcharge, afterHoursCharge, weekendCharge, redeliveryCharge,
       cancellationFee, otherCharges, gstTreatment
     } = req.body;
@@ -669,7 +670,8 @@ exports.savePricingProfile = async (req, res, next) => {
       baseRate: parseFloat(baseRate) || parseFloat(rate) || 0,
       minimumCharge: parseFloat(minCharge) || null,
       fuelLevyPercent: parseFloat(fuelLevy) || 0,
-      additionalStopCharge: parseFloat(additionalStopCharge) || null,
+      extraPickupCharge: parseFloat(extraPickupCharge) || null,
+      extraDeliveryCharge: parseFloat(extraDeliveryCharge) || null,
       waitingTimeCharge: parseFloat(waitingTimeCharge) || null,
       storageCharge: parseFloat(storageCharge) || null,
       tollsCharge: parseFloat(tolls) || null,
@@ -732,8 +734,11 @@ exports.getSurcharges = async (req, res, next) => {
         if (p.dgSurcharge && p.dgSurcharge > 0) {
           surcharges.push({ id: `profile_dg_${p.id}`, description: `DG Surcharge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.dgSurcharge), taxable: true, isFromRule: true });
         }
-        if (p.additionalStopCharge && p.additionalStopCharge > 0) {
-          surcharges.push({ id: `profile_stop_${p.id}`, description: `Extra Stop Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.additionalStopCharge), taxable: true, isFromRule: true });
+        if (p.extraPickupCharge && p.extraPickupCharge > 0) {
+          surcharges.push({ id: `profile_pickup_${p.id}`, description: `Extra Pickup Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.extraPickupCharge), taxable: true, isFromRule: true });
+        }
+        if (p.extraDeliveryCharge && p.extraDeliveryCharge > 0) {
+          surcharges.push({ id: `profile_delivery_${p.id}`, description: `Extra Delivery Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.extraDeliveryCharge), taxable: true, isFromRule: true });
         }
         if (p.storageCharge && p.storageCharge > 0) {
           surcharges.push({ id: `profile_storage_${p.id}`, description: `Storage Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.storageCharge), taxable: true, isFromRule: true });
