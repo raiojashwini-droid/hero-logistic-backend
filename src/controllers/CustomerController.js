@@ -681,24 +681,33 @@ exports.getSurcharges = async (req, res, next) => {
     const customerId = await resolveCustomerId(req.params.id, companyId);
     if (!customerId) return sendSuccess(res, []);
     const data = await prisma.customerPricingProfile.findMany({
-      where: { customerId }
+      where: { customerId, isActive: true }
     });
     const surcharges = [];
     data.forEach(p => {
-      if (p.fuelLevyPercent && p.fuelLevyPercent > 0) {
-        surcharges.push({ id: `fuel_${p.id}`, description: `Fuel Levy (${p.name})`, calculation: '% of Base Rate', rate: String(p.fuelLevyPercent) });
-      }
-      if (p.tollsCharge && p.tollsCharge > 0) {
-        surcharges.push({ id: `tolls_${p.id}`, description: `Tolls Charge (${p.name})`, calculation: 'Flat Fee ($)', rate: String(p.tollsCharge) });
-      }
-      if (p.waitingTimeCharge && p.waitingTimeCharge > 0) {
-        surcharges.push({ id: `waiting_${p.id}`, description: `Waiting Time Charge (${p.name})`, calculation: 'Flat Fee ($)', rate: String(p.waitingTimeCharge) });
-      }
-      if (p.dgSurcharge && p.dgSurcharge > 0) {
-        surcharges.push({ id: `dg_${p.id}`, description: `DG Surcharge (${p.name})`, calculation: 'Flat Fee ($)', rate: String(p.dgSurcharge) });
-      }
-      if (p.otherCharges && p.otherCharges > 0) {
-        surcharges.push({ id: `other_${p.id}`, description: p.name || 'Other Surcharge', calculation: p.calculationMethod || 'Flat Fee ($)', rate: String(p.otherCharges) });
+      if (p.freightType === 'SURCHARGE') {
+        const rateVal = p.fuelLevyPercent || p.baseRate || p.otherCharges || 0;
+        surcharges.push({
+          id: p.id,
+          description: p.name,
+          calculation: p.calculationMethod || '% of Base Rate',
+          rate: String(rateVal),
+          taxable: true,
+          isFromRule: false
+        });
+      } else {
+        if (p.fuelLevyPercent && p.fuelLevyPercent > 0) {
+          surcharges.push({ id: `profile_fuel_${p.id}`, description: `Fuel Levy (${p.name || 'Standard'})`, calculation: '% of Base Rate', rate: String(p.fuelLevyPercent), taxable: true, isFromRule: true });
+        }
+        if (p.tollsCharge && p.tollsCharge > 0) {
+          surcharges.push({ id: `profile_tolls_${p.id}`, description: `Tolls Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.tollsCharge), taxable: true, isFromRule: true });
+        }
+        if (p.waitingTimeCharge && p.waitingTimeCharge > 0) {
+          surcharges.push({ id: `profile_waiting_${p.id}`, description: `Waiting Time Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.waitingTimeCharge), taxable: true, isFromRule: true });
+        }
+        if (p.dgSurcharge && p.dgSurcharge > 0) {
+          surcharges.push({ id: `profile_dg_${p.id}`, description: `DG Surcharge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.dgSurcharge), taxable: true, isFromRule: true });
+        }
       }
     });
     return sendSuccess(res, surcharges);
@@ -707,11 +716,10 @@ exports.getSurcharges = async (req, res, next) => {
 
 exports.saveSurcharge = async (req, res, next) => {
   try {
-    const { description, calculation, rate } = req.body;
+    const { id, description, calculation, rate, taxable } = req.body;
     const isPercent = (calculation || '').includes('%');
     const numericRate = parseFloat(rate) || 0;
     
-    // Resolve & validate customer
     const companyId = resolveCompanyId(req);
     const customerId = await resolveCustomerId(req.params.id, companyId);
     if (!customerId) {
@@ -721,23 +729,65 @@ exports.saveSurcharge = async (req, res, next) => {
       }, HTTP_STATUS.BAD_REQUEST);
     }
 
-    const result = await prisma.customerPricingProfile.create({
-      data: {
-        customerId,
-        name: description || 'Surcharge',
-        calculationMethod: calculation || '% of Base Rate',
-        baseRate: isPercent ? 0 : numericRate,
-        fuelLevyPercent: isPercent ? numericRate : 0,
-        otherCharges: isPercent ? 0 : numericRate,
-        isActive: true
+    let result;
+    if (id && !id.startsWith('profile_') && isNaN(Number(id)) === false) {
+      try {
+        result = await prisma.customerPricingProfile.update({
+          where: { id },
+          data: {
+            name: description || 'Surcharge',
+            freightType: 'SURCHARGE',
+            calculationMethod: calculation || '% of Base Rate',
+            baseRate: isPercent ? 0 : numericRate,
+            fuelLevyPercent: isPercent ? numericRate : 0,
+            otherCharges: isPercent ? 0 : numericRate,
+            isActive: true
+          }
+        });
+      } catch (e) {
+        result = null;
       }
-    });
+    }
+
+    if (!result) {
+      result = await prisma.customerPricingProfile.create({
+        data: {
+          customerId,
+          name: description || 'Surcharge',
+          freightType: 'SURCHARGE',
+          calculationMethod: calculation || '% of Base Rate',
+          baseRate: isPercent ? 0 : numericRate,
+          fuelLevyPercent: isPercent ? numericRate : 0,
+          otherCharges: isPercent ? 0 : numericRate,
+          isActive: true
+        }
+      });
+    }
+
     return sendSuccess(res, {
       id: result.id,
       description: result.name,
       calculation: result.calculationMethod,
-      rate: String(numericRate)
+      rate: String(numericRate),
+      taxable: taxable !== false
     });
+  } catch (error) { next(error); }
+};
+
+exports.deleteSurcharge = async (req, res, next) => {
+  try {
+    const surchargeId = req.params.surchargeId || req.body.id || req.body.surchargeId;
+    if (surchargeId) {
+      try {
+        await prisma.customerPricingProfile.delete({ where: { id: surchargeId } });
+      } catch (e) {
+        await prisma.customerPricingProfile.update({
+          where: { id: surchargeId },
+          data: { isActive: false }
+        }).catch(() => {});
+      }
+    }
+    return sendSuccess(res, { message: 'Surcharge deleted successfully' });
   } catch (error) { next(error); }
 };
 

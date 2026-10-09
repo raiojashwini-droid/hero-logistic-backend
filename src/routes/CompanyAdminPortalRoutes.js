@@ -186,6 +186,8 @@ router.get('/customers/:id/pricing-profiles', CustomerController.getPricingProfi
 router.post('/customers/:id/pricing-profiles', CustomerController.savePricingProfile);
 router.get('/customers/:id/surcharges', CustomerController.getSurcharges);
 router.post('/customers/:id/surcharges', CustomerController.saveSurcharge);
+router.delete('/customers/:id/surcharges/:surchargeId', CustomerController.deleteSurcharge);
+router.delete('/customers/:id/surcharges', CustomerController.deleteSurcharge);
 router.get('/customers/:id/billing-rules', CustomerController.getBillingRules);
 router.post('/customers/:id/billing-rules', CustomerController.saveBillingRule);
 router.get('/customers/:id/rate-cards', CustomerController.getRateCards);

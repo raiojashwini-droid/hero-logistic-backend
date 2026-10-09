@@ -36,7 +36,10 @@ router.route('/:id/pricing-profiles')
 
 router.route('/:id/surcharges')
   .get(CustomerController.getSurcharges)
-  .post(CustomerController.saveSurcharge);
+  .post(CustomerController.saveSurcharge)
+  .delete(CustomerController.deleteSurcharge);
+
+router.delete('/:id/surcharges/:surchargeId', CustomerController.deleteSurcharge);
 
 router.route('/:id/billing-rules')
   .get(CustomerController.getBillingRules)
