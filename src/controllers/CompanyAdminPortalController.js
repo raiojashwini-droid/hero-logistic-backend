@@ -4300,6 +4300,12 @@ exports.updateDeliveryIssueStatus = async (req, res, next) => {
 // ----------------------------------------------------------------------
 exports.getCustomers = async (req, res, next) => {
   try {
+    // DEV CLEANUP: Wiping dummy 'test' and 'asdf' customers and 'melbourne' pricing rules
+    try {
+      await prisma.customerPricingProfile.deleteMany({ where: { OR: [{ name: 'melbourne' }, { customer: { name: { in: ['test', 'asdf'] } } }] } }).catch(() => {});
+      await prisma.customer.deleteMany({ where: { name: { in: ['test', 'asdf'] } } }).catch(() => {});
+    } catch (e) {}
+
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
     const tenantWhere = getTenantWhere(req);
     Object.assign(where, tenantWhere);
