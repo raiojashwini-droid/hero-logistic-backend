@@ -536,12 +536,42 @@ exports.deleteRateCard = async (req, res, next) => {
   }
 };
 
+// --- Helper: Resolve & validate customer ID from URL param ---
+const resolveCustomerId = async (rawId, companyId) => {
+  if (!rawId) return null;
+
+  // Try direct lookup first
+  const directMatch = await prisma.customer.findUnique({ where: { id: rawId } }).catch(() => null);
+  if (directMatch) return directMatch.id;
+
+  // If it looks like a local timestamp ID (all digits, > 10 chars) — it was never saved to DB
+  if (/^\d{10,}$/.test(rawId)) {
+    return null; // Signal: customer ID is a local frontend ID, not a real DB record
+  }
+
+  // Last resort: search by companyId scope
+  if (companyId) {
+    const byCompany = await prisma.customer.findFirst({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' }
+    }).catch(() => null);
+    if (byCompany) return byCompany.id;
+  }
+
+  return null;
+};
+
 // --- DB-Backed Pricing Profiles ---
 
 exports.getPricingProfiles = async (req, res, next) => {
   try {
+    const companyId = resolveCompanyId(req);
+    const customerId = await resolveCustomerId(req.params.id, companyId);
+    if (!customerId) {
+      return sendSuccess(res, []); // No customer found → return empty list gracefully
+    }
     const data = await prisma.customerPricingProfile.findMany({
-      where: { customerId: req.params.id },
+      where: { customerId },
       orderBy: { createdAt: 'desc' }
     });
     // Map to frontend expected format (includes all fields for auto-match pricing)
@@ -591,11 +621,21 @@ exports.savePricingProfile = async (req, res, next) => {
       otherCharges, gstTreatment
     } = req.body;
     let result;
+
+    // Resolve & validate customer exists in DB
+    const companyId = resolveCompanyId(req);
+    const customerId = await resolveCustomerId(req.params.id, companyId);
+    if (!customerId) {
+      return sendError(res, {
+        code: 'CUSTOMER_NOT_FOUND',
+        message: `Customer with ID '${req.params.id}' was not found in the database. Please save the customer first before adding pricing rules.`
+      }, HTTP_STATUS.BAD_REQUEST);
+    }
     
     // Convert from frontend schema
     const dataObj = {
-      customerId: req.params.id,
-      name: name || description || `${from} ➔ ${to}`,
+      customerId,
+      name: name || description || `${from || 'Any'} ➔ ${to || 'Any'}`,
       transportNiche: transportNiche || null,
       effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : null,
       effectiveTo: effectiveTo ? new Date(effectiveTo) : null,
@@ -618,7 +658,8 @@ exports.savePricingProfile = async (req, res, next) => {
       gstTreatment: gstTreatment || null
     };
 
-    if (id && id.length > 20) { // basic UUID check vs frontend timestamp
+    // If updating an existing rule by its real DB ID
+    if (id && !/^\d{10,}$/.test(id) && id.length > 10) {
        result = await prisma.customerPricingProfile.update({
          where: { id },
          data: dataObj
@@ -636,8 +677,11 @@ exports.savePricingProfile = async (req, res, next) => {
 
 exports.getSurcharges = async (req, res, next) => {
   try {
+    const companyId = resolveCompanyId(req);
+    const customerId = await resolveCustomerId(req.params.id, companyId);
+    if (!customerId) return sendSuccess(res, []);
     const data = await prisma.customerPricingProfile.findMany({
-      where: { customerId: req.params.id }
+      where: { customerId }
     });
     const surcharges = [];
     data.forEach(p => {
@@ -667,9 +711,19 @@ exports.saveSurcharge = async (req, res, next) => {
     const isPercent = (calculation || '').includes('%');
     const numericRate = parseFloat(rate) || 0;
     
+    // Resolve & validate customer
+    const companyId = resolveCompanyId(req);
+    const customerId = await resolveCustomerId(req.params.id, companyId);
+    if (!customerId) {
+      return sendError(res, {
+        code: 'CUSTOMER_NOT_FOUND',
+        message: `Customer '${req.params.id}' not found. Save the customer first.`
+      }, HTTP_STATUS.BAD_REQUEST);
+    }
+
     const result = await prisma.customerPricingProfile.create({
       data: {
-        customerId: req.params.id,
+        customerId,
         name: description || 'Surcharge',
         calculationMethod: calculation || '% of Base Rate',
         baseRate: isPercent ? 0 : numericRate,
@@ -689,8 +743,11 @@ exports.saveSurcharge = async (req, res, next) => {
 
 exports.getBillingRules = async (req, res, next) => {
   try {
+    const companyId = resolveCompanyId(req);
+    const customerId = await resolveCustomerId(req.params.id, companyId);
+    if (!customerId) return sendSuccess(res, []);
     const data = await prisma.customerBillingRule.findMany({
-      where: { customerId: req.params.id }
+      where: { customerId }
     });
     return sendSuccess(res, data);
   } catch (error) { next(error); }
@@ -706,8 +763,18 @@ exports.saveBillingRule = async (req, res, next) => {
     } = req.body;
     let result;
 
+    // Resolve & validate customer
+    const companyId = resolveCompanyId(req);
+    const customerId = await resolveCustomerId(req.params.id, companyId);
+    if (!customerId) {
+      return sendError(res, {
+        code: 'CUSTOMER_NOT_FOUND',
+        message: `Customer with ID '${req.params.id}' was not found. Please save the customer first.`
+      }, HTTP_STATUS.BAD_REQUEST);
+    }
+
     const dataObj = {
-      customerId: req.params.id,
+      customerId,
       name: name || 'Standard Billing Rule',
       invoiceTrigger: invoiceTrigger || 'Delivery completed',
       invoiceGrouping: invoiceGrouping || 'Per load',
