@@ -449,15 +449,25 @@ exports.getContacts = async (req, res, next) => {
   }
 };
 
-// Customer Rate Cards In-Memory / Context Store
-const customerRateCardStore = {};
-
 // Get Rate Cards for Customer
 exports.getRateCards = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const cards = customerRateCardStore[id] || [];
-    return sendSuccess(res, cards);
+    const cards = await prisma.customerPricingProfile.findMany({
+      where: { customerId: id, freightType: 'RATE_CARD' },
+      orderBy: { createdAt: 'desc' }
+    });
+    const mapped = cards.map(c => ({
+      id: c.id,
+      name: c.name,
+      unit: c.calculationMethod || 'Per Load',
+      baseRate: c.baseRate || 0,
+      gst: c.gstTreatment || '10%',
+      status: c.isActive ? 'Active' : 'Inactive',
+      category: c.transportNiche || 'General',
+      createdAt: c.createdAt
+    }));
+    return sendSuccess(res, mapped);
   } catch (error) {
     next(error);
   }
@@ -467,27 +477,34 @@ exports.getRateCards = async (req, res, next) => {
 exports.addRateCard = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, unit, rate, gst, status } = req.body;
+    const { name, unit, rate, baseRate, category, gst, status } = req.body;
 
     if (!name) {
       return sendError(res, { code: ERROR_CODES.VALIDATION_ERROR, message: 'Charge name is required' }, HTTP_STATUS.BAD_REQUEST);
     }
 
-    const card = {
-      id: `RC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      customerId: id,
-      name: name.trim(),
-      unit: unit || 'Per Unit',
-      rate: parseFloat(rate) || 0,
-      gst: gst !== undefined ? parseFloat(gst) : 10.0,
-      status: status || 'Active',
-      createdAt: new Date().toISOString()
-    };
+    const card = await prisma.customerPricingProfile.create({
+      data: {
+        customerId: id,
+        name: name.trim(),
+        freightType: 'RATE_CARD',
+        calculationMethod: unit || 'Per Load',
+        baseRate: parseFloat(baseRate) || parseFloat(rate) || 0,
+        gstTreatment: gst !== undefined ? String(gst) : '10%',
+        isActive: status ? status === 'Active' : true,
+        transportNiche: category || 'General'
+      }
+    });
 
-    if (!customerRateCardStore[id]) customerRateCardStore[id] = [];
-    customerRateCardStore[id].unshift(card);
-
-    return sendSuccess(res, card, HTTP_STATUS.CREATED);
+    return sendSuccess(res, {
+      id: card.id,
+      name: card.name,
+      unit: card.calculationMethod,
+      baseRate: card.baseRate,
+      gst: card.gstTreatment,
+      status: card.isActive ? 'Active' : 'Inactive',
+      category: card.transportNiche
+    }, HTTP_STATUS.CREATED);
   } catch (error) {
     next(error);
   }
@@ -496,28 +513,35 @@ exports.addRateCard = async (req, res, next) => {
 // Update Rate Card for Customer
 exports.updateRateCard = async (req, res, next) => {
   try {
-    const { id, cardId } = req.params;
-    const { name, unit, rate, gst, status } = req.body;
+    const { cardId } = req.params;
+    const { name, unit, rate, baseRate, category, gst, status } = req.body;
 
-    const cards = customerRateCardStore[id] || [];
-    const index = cards.findIndex(c => c.id === cardId);
-
-    if (index === -1) {
+    const existing = await prisma.customerPricingProfile.findUnique({ where: { id: cardId } });
+    if (!existing) {
       return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Rate Card not found' }, HTTP_STATUS.NOT_FOUND);
     }
 
-    const updated = {
-      ...cards[index],
-      ...(name && { name: name.trim() }),
-      ...(unit && { unit }),
-      ...(rate !== undefined && { rate: parseFloat(rate) }),
-      ...(gst !== undefined && { gst: parseFloat(gst) }),
-      ...(status && { status }),
-      updatedAt: new Date().toISOString()
-    };
+    const card = await prisma.customerPricingProfile.update({
+      where: { id: cardId },
+      data: {
+        name: name ? name.trim() : existing.name,
+        calculationMethod: unit || existing.calculationMethod,
+        baseRate: (baseRate !== undefined) ? parseFloat(baseRate) : (rate !== undefined ? parseFloat(rate) : existing.baseRate),
+        gstTreatment: gst !== undefined ? String(gst) : existing.gstTreatment,
+        isActive: status ? status === 'Active' : existing.isActive,
+        transportNiche: category || existing.transportNiche
+      }
+    });
 
-    customerRateCardStore[id][index] = updated;
-    return sendSuccess(res, updated);
+    return sendSuccess(res, {
+      id: card.id,
+      name: card.name,
+      unit: card.calculationMethod,
+      baseRate: card.baseRate,
+      gst: card.gstTreatment,
+      status: card.isActive ? 'Active' : 'Inactive',
+      category: card.transportNiche
+    });
   } catch (error) {
     next(error);
   }
@@ -526,10 +550,8 @@ exports.updateRateCard = async (req, res, next) => {
 // Delete Rate Card for Customer
 exports.deleteRateCard = async (req, res, next) => {
   try {
-    const { id, cardId } = req.params;
-    if (customerRateCardStore[id]) {
-      customerRateCardStore[id] = customerRateCardStore[id].filter(c => c.id !== cardId);
-    }
+    const { cardId } = req.params;
+    await prisma.customerPricingProfile.delete({ where: { id: cardId } }).catch(() => {});
     return res.status(HTTP_STATUS.NO_CONTENT).send();
   } catch (error) {
     next(error);
@@ -618,7 +640,7 @@ exports.savePricingProfile = async (req, res, next) => {
       transportNiche, effectiveFrom, effectiveTo, isActive, zone,
       minCharge, additionalStopCharge, waitingTimeCharge, storageCharge,
       tolls, dgSurcharge, afterHoursCharge, weekendCharge, redeliveryCharge,
-      otherCharges, gstTreatment
+      cancellationFee, otherCharges, gstTreatment
     } = req.body;
     let result;
 
@@ -654,6 +676,8 @@ exports.savePricingProfile = async (req, res, next) => {
       dgSurcharge: parseFloat(dgSurcharge) || null,
       afterHoursSurcharge: parseFloat(afterHoursCharge) || null,
       redeliveryCharge: parseFloat(redeliveryCharge) || null,
+      weekendCharge: parseFloat(weekendCharge) || null,
+      cancellationFee: parseFloat(cancellationFee) || null,
       otherCharges: parseFloat(otherCharges) || null,
       gstTreatment: gstTreatment || null
     };
@@ -707,6 +731,27 @@ exports.getSurcharges = async (req, res, next) => {
         }
         if (p.dgSurcharge && p.dgSurcharge > 0) {
           surcharges.push({ id: `profile_dg_${p.id}`, description: `DG Surcharge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.dgSurcharge), taxable: true, isFromRule: true });
+        }
+        if (p.additionalStopCharge && p.additionalStopCharge > 0) {
+          surcharges.push({ id: `profile_stop_${p.id}`, description: `Extra Stop Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.additionalStopCharge), taxable: true, isFromRule: true });
+        }
+        if (p.storageCharge && p.storageCharge > 0) {
+          surcharges.push({ id: `profile_storage_${p.id}`, description: `Storage Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.storageCharge), taxable: true, isFromRule: true });
+        }
+        if (p.afterHoursSurcharge && p.afterHoursSurcharge > 0) {
+          surcharges.push({ id: `profile_afterhours_${p.id}`, description: `After Hours Surcharge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.afterHoursSurcharge), taxable: true, isFromRule: true });
+        }
+        if (p.redeliveryCharge && p.redeliveryCharge > 0) {
+          surcharges.push({ id: `profile_redelivery_${p.id}`, description: `Redelivery Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.redeliveryCharge), taxable: true, isFromRule: true });
+        }
+        if (p.weekendCharge && p.weekendCharge > 0) {
+          surcharges.push({ id: `profile_weekend_${p.id}`, description: `Weekend Charge (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.weekendCharge), taxable: true, isFromRule: true });
+        }
+        if (p.cancellationFee && p.cancellationFee > 0) {
+          surcharges.push({ id: `profile_cancellation_${p.id}`, description: `Cancellation Fee (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.cancellationFee), taxable: true, isFromRule: true });
+        }
+        if (p.otherCharges && p.otherCharges > 0) {
+          surcharges.push({ id: `profile_other_${p.id}`, description: `Other Charges (${p.name || 'Standard'})`, calculation: 'Flat Fee ($)', rate: String(p.otherCharges), taxable: true, isFromRule: true });
         }
       }
     });

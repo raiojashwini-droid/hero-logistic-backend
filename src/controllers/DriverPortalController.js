@@ -1605,6 +1605,10 @@ exports.confirmDeliveryPOD = async (req, res, next) => {
     const { loadId, mode, notes, signature, photos } = req.body;
     let targetLoadId = loadId;
 
+    if (!signature && (!photos || photos.length === 0)) {
+      return sendError(res, { code: 'VALIDATION_ERROR', message: 'Proof of Delivery (Signature or Photo) is required to complete this job.' }, 400);
+    }
+
     if (!targetLoadId && driver) {
       const activeLoad = await prisma.load.findFirst({
         where: {

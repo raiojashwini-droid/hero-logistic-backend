@@ -1692,6 +1692,8 @@ model CustomerPricingProfile {
   dgSurcharge          Float?
   afterHoursSurcharge  Float?
   redeliveryCharge     Float?
+  weekendCharge        Float?
+  cancellationFee      Float?
   otherCharges         Float?
   gstTreatment         String?
   autoCalculation      Boolean   @default(true)
