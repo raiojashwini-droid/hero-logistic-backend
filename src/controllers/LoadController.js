@@ -353,6 +353,13 @@ exports.create = async (req, res, next) => {
       console.warn('Load pricing snapshot build warning:', snapErr?.message);
     }
 
+    // Phase 7B: Extract billedCustomerIds before cleaning payload
+    const billedCustomerIds = Array.isArray(payload.billedCustomerIds)
+      ? payload.billedCustomerIds.filter(id => id && typeof id === 'string' && id.length > 5)
+      : [];
+    delete payload.billedCustomerIds;
+    delete payload.billingSnapshots;
+
     const cleanedPayload = cleanLoadPayload(payload);
 
     const data = await prisma.load.create({
@@ -361,10 +368,27 @@ exports.create = async (req, res, next) => {
         driver: true,
         truck: true,
         customer: true,
+        billedCustomers: true,
         stops: true,
         items: true
       }
     });
+
+    // Phase 7B: Connect billedCustomers after load creation
+    if (billedCustomerIds.length > 0 && data?.id) {
+      try {
+        await prisma.load.update({
+          where: { id: data.id },
+          data: {
+            billedCustomers: {
+              connect: billedCustomerIds.map(id => ({ id }))
+            }
+          }
+        });
+      } catch (bcErr) {
+        console.warn('billedCustomers connect on create warning:', bcErr?.message);
+      }
+    }
 
     if (agreedRate && data.id) {
       try {
@@ -501,6 +525,13 @@ exports.update = async (req, res, next) => {
       }
     }
 
+    // Phase 7B: Handle billedCustomers update (set replaces entire list)
+    const updateBilledIds = Array.isArray(updateData.billedCustomerIds)
+      ? updateData.billedCustomerIds.filter(id => id && typeof id === 'string' && id.length > 5)
+      : null;
+    delete updateData.billedCustomerIds;
+    delete updateData.billingSnapshots;
+
     const cleanedData = cleanLoadPayload(updateData);
 
     const data = await prisma.load.update({
@@ -510,10 +541,27 @@ exports.update = async (req, res, next) => {
         driver: true,
         truck: true,
         customer: true,
+        billedCustomers: true,
         stops: true,
         items: true
       }
     });
+
+    // Phase 7B: Update billedCustomers (set replaces entire list)
+    if (updateBilledIds !== null && data?.id) {
+      try {
+        await prisma.load.update({
+          where: { id: data.id },
+          data: {
+            billedCustomers: {
+              set: updateBilledIds.map(id => ({ id }))
+            }
+          }
+        });
+      } catch (bcErr) {
+        console.warn('billedCustomers set on update warning:', bcErr?.message);
+      }
+    }
 
     if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(updateData.status) || ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status)) {
       try {
