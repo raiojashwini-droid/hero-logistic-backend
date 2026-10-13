@@ -42,8 +42,9 @@ exports.getAll = async (req, res, next) => {
           activities: true,
           trailer: true,
           customer: true,
+          billedCustomers: true,
           stops: true,
-          items: true
+          items: { include: { customer: true } }
         }
       }),
       prisma.load.count({ where })
@@ -86,8 +87,9 @@ exports.getById = async (req, res, next) => {
         truck: true,
         trailer: true,
         customer: true,
+        billedCustomers: true,
         stops: true,
-        items: true,
+        items: { include: { customer: true } },
         deliveryPods: true,
         expenses: true
       }
@@ -256,6 +258,7 @@ exports.create = async (req, res, next) => {
       const itemsData = payload.items.map(i => ({
         // Common & Car Carrying
         stockRef: i.stockRef || i.rego || i.vin || 'ITEM-REF',
+        customerId: (i.customerId && typeof i.customerId === 'string' && i.customerId.length > 5) ? i.customerId : (payload.customerId || null),
         make: i.make || null,
         model: i.model || null,
         rego: i.rego || null,
@@ -509,6 +512,7 @@ exports.update = async (req, res, next) => {
       if (itemsInput.length > 0) {
         const itemsToCreate = itemsInput.map(i => ({
           loadId: targetLoad.id,
+          customerId: (i.customerId && typeof i.customerId === 'string' && i.customerId.length > 5) ? i.customerId : (targetLoad.customerId || null),
           stockRef: i.stockRef || i.rego || i.vin || 'ITEM-REF',
           make: i.make || null,
           model: i.model || null,

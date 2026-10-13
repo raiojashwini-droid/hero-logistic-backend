@@ -1201,23 +1201,28 @@ exports.getPickupLoad = async (req, res, next) => {
     }
 
     // Phase 3: map items with customer info
-    const cars = (load.items || []).map((item, index) => ({
-      id: item.id,
-      dbId: item.id,
-      drop: item.category || `DROP ${(index % 4) + 1}`,
-      dropLoc: item.location || destination,
-      vin: item.vin || `VIN-${index + 1}`,
-      makeModel: `${item.make || ''} ${item.model || ''}`.trim() || item.description || 'Vehicle',
-      color: item.color || 'White',
-      plate: item.rego || `REG-${index + 1}`,
-      pickedUp: item.status === 'PICKED_UP' || item.status === 'LOADED' || item.status === 'DELIVERED',
-      time: item.status === 'PICKED_UP' || item.status === 'LOADED' ? (item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '08:12 AM') : null,
-      photos: { current: item.status === 'PICKED_UP' ? 4 : 0, total: 4, percent: item.status === 'PICKED_UP' ? 100 : 0 },
-      // Customer fields for multi-customer support
-      customerId: item.customerId || null,
-      customerName: item.customer?.name || null,
-      customerContact: item.customer?.contactName || null
-    }));
+    const cars = (load.items || []).map((item, index) => {
+      const customerObj = item.customer 
+        || (load.billedCustomers || []).find(bc => bc.id === item.customerId)
+        || (load.customer?.id === item.customerId ? load.customer : null);
+      return {
+        id: item.id,
+        dbId: item.id,
+        drop: item.category || `DROP ${(index % 4) + 1}`,
+        dropLoc: item.location || destination,
+        vin: item.vin || `VIN-${index + 1}`,
+        makeModel: `${item.make || ''} ${item.model || ''}`.trim() || item.description || 'Vehicle',
+        color: item.color || 'White',
+        plate: item.rego || `REG-${index + 1}`,
+        pickedUp: item.status === 'PICKED_UP' || item.status === 'LOADED' || item.status === 'DELIVERED',
+        time: item.status === 'PICKED_UP' || item.status === 'LOADED' ? (item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '08:12 AM') : null,
+        photos: { current: item.status === 'PICKED_UP' ? 4 : 0, total: 4, percent: item.status === 'PICKED_UP' ? 100 : 0 },
+        // Customer fields for multi-customer support
+        customerId: item.customerId || null,
+        customerName: customerObj?.name || item.customer?.name || null,
+        customerContact: customerObj?.contactName || item.customer?.contactName || null
+      };
+    });
 
     const responseData = {
       id: load.loadRef || load.loadNumber || load.id,
@@ -1253,13 +1258,14 @@ exports.getPickupCustomers = async (req, res, next) => {
     let customers = [];
 
     if (loadId && prisma.load) {
-      // Fix: removed driverId filter — load may not yet be assigned to this driver
-      // but driver is authenticated via JWT so company-scoped access is safe
+      // Fix: UUID safe check - supports both UUID loadId and human readable loadRef
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(loadId);
+      const loadWhere = {
+        ...(isUuid ? { id: loadId } : { OR: [{ id: loadId }, { loadRef: loadId }, { loadNumber: loadId }] }),
+        ...(driver.companyId && { companyId: driver.companyId })
+      };
       const load = await prisma.load.findFirst({
-        where: {
-          id: loadId,
-          ...(driver.companyId && { companyId: driver.companyId })
-        },
+        where: loadWhere,
         include: {
           billedCustomers: { select: { id: true, name: true, contactName: true, phone: true } },
           customer: { select: { id: true, name: true, contactName: true, phone: true } }
@@ -1346,22 +1352,23 @@ exports.addPickupItem = async (req, res, next) => {
 
     let createdItem = null;
     if (prisma.loadItem && loadId) {
-      // Fix: allow company-scoped access so planning-board-assigned loads work.
-      // Previously this was strictly driverId only — caused 403 for loads assigned via Planning Board UI.
+      // Fix: UUID safe check - supports both UUID loadId and human readable loadRef
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(loadId);
+      const targetWhere = {
+        ...(isUuid ? { id: loadId } : { OR: [{ id: loadId }, { loadRef: loadId }, { loadNumber: loadId }] }),
+        OR: [
+          { driverId: driver.id },
+          { companyId: driver.companyId }
+        ]
+      };
       const load = await prisma.load.findFirst({
-        where: {
-          id: loadId,
-          OR: [
-            { driverId: driver.id },
-            { companyId: driver.companyId }
-          ]
-        }
+        where: targetWhere
       }).catch(() => null);
       if (!load) return sendError(res, { code: 'FORBIDDEN', message: 'You do not have permission to add items to this load' }, 403);
 
       // Phase 2: link customerId to the item (connects to Customer table via FK)
       const itemData = {
-        loadId,
+        loadId: load.id,
         vin: vin || `VIN-${Date.now().toString().slice(-6)}`,
         description: makeModel || 'Vehicle Freight',
         category: drop || undefined,
@@ -1552,7 +1559,8 @@ exports.getDeliveryPOD = async (req, res, next) => {
         },
         include: {
           stops: { orderBy: { sequenceIndex: 'asc' } },
-          items: true,
+          items: { include: { customer: { select: { id: true, name: true, contactName: true } } } },
+          billedCustomers: { select: { id: true, name: true, contactName: true } },
           customer: true
         },
         orderBy: { createdAt: 'desc' }
@@ -1566,7 +1574,8 @@ exports.getDeliveryPOD = async (req, res, next) => {
           },
           include: {
             stops: { orderBy: { sequenceIndex: 'asc' } },
-            items: true,
+            items: { include: { customer: { select: { id: true, name: true, contactName: true } } } },
+            billedCustomers: { select: { id: true, name: true, contactName: true } },
             customer: true
           },
           orderBy: { createdAt: 'desc' }
@@ -1605,19 +1614,26 @@ exports.getDeliveryPOD = async (req, res, next) => {
       destination = load.destination || '—';
     }
 
-    const cars = (load.items || []).map((item, index) => ({
-      id: item.id,
-      dbId: item.id,
-      drop: item.category || 'DROP 1',
-      dropLoc: item.location || deliveryLocation,
-      vin: item.vin || `VIN-${index + 1}`,
-      makeModel: `${item.make || ''} ${item.model || ''}`.trim() || item.description || 'Vehicle',
-      color: item.color || 'White',
-      plate: item.rego || `REG-${index + 1}`,
-      delivered: item.status === 'DELIVERED' || item.status === 'COMPLETED',
-      time: item.status === 'DELIVERED' ? (item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '01:57 PM') : null,
-      photos: { current: item.status === 'DELIVERED' ? 4 : 0, total: 4, percent: item.status === 'DELIVERED' ? 100 : 0 }
-    }));
+    const cars = (load.items || []).map((item, index) => {
+      const customerObj = item.customer 
+        || (load.billedCustomers || []).find(bc => bc.id === item.customerId)
+        || (load.customer?.id === item.customerId ? load.customer : null);
+      return {
+        id: item.id,
+        dbId: item.id,
+        drop: item.category || 'DROP 1',
+        dropLoc: item.location || deliveryLocation,
+        vin: item.vin || `VIN-${index + 1}`,
+        makeModel: `${item.make || ''} ${item.model || ''}`.trim() || item.description || 'Vehicle',
+        color: item.color || 'White',
+        plate: item.rego || `REG-${index + 1}`,
+        delivered: item.status === 'DELIVERED' || item.status === 'COMPLETED',
+        time: item.status === 'DELIVERED' ? (item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '01:57 PM') : null,
+        photos: { current: item.status === 'DELIVERED' ? 4 : 0, total: 4, percent: item.status === 'DELIVERED' ? 100 : 0 },
+        customerId: item.customerId || null,
+        customerName: customerObj?.name || item.customer?.name || null
+      };
+    });
 
     const totalCarsCount = cars.length;
     const deliveredCount = cars.filter(c => c.delivered).length;
