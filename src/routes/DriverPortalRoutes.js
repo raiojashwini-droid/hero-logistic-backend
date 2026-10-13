@@ -21,7 +21,6 @@ router.post('/checklists', DriverPortalController.submitChecklist);
 
 // Jobs, Active Run & Pickup
 // Added routes for Driver Dashboard Pickup & Loading API
-router.get('/payroll', DriverPortalController.getPayroll);
 router.get('/pickup-load', DriverPortalController.getPickupLoad);
 // Phase 1: Customer list for a specific load (powers Driver Add Item dropdown)
 router.get('/pickup-load/customers', DriverPortalController.getPickupCustomers);
@@ -42,10 +41,6 @@ router.get('/active-run', DriverPortalController.getActiveRun);
 router.get('/jobs', DriverPortalController.getJobs);
 router.post('/jobs', DriverPortalController.createJobRequest);
 router.delete('/jobs/:id', DriverPortalController.deleteJob);
-router.get('/active-run', DriverPortalController.getActiveRun);
-router.get('/pickup-load', DriverPortalController.getPickupLoad);
-router.post('/pickup-load/item-status', DriverPortalController.updatePickupItemStatus);
-router.post('/pickup-load/items', DriverPortalController.addPickupItem);
 
 // Expenses
 router.get('/expenses', DriverPortalController.getExpenses);

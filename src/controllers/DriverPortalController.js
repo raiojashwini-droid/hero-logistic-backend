@@ -1222,10 +1222,14 @@ exports.getPickupLoad = async (req, res, next) => {
     const responseData = {
       id: load.loadRef || load.loadNumber || load.id,
       dbId: load.id,
+      // Fix: loadType was missing — frontend uses this for Vehicle vs Freight label logic everywhere
+      loadType: load.type || load.category || load.loadType || 'General Freight',
       origin,
       destination,
       pickupTime: load.loadDate ? new Date(load.loadDate).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '—',
       estFinish: '—',
+      // Fix: totalCars was missing — used by Load Summary card in frontend
+      totalCars: cars.length,
       cars,
       // Phase 1: send list of customers linked to this load for the dropdown
       customers: (load.billedCustomers || []).length > 0 ? load.billedCustomers : []
@@ -1342,9 +1346,17 @@ exports.addPickupItem = async (req, res, next) => {
 
     let createdItem = null;
     if (prisma.loadItem && loadId) {
+      // Fix: allow company-scoped access so planning-board-assigned loads work.
+      // Previously this was strictly driverId only — caused 403 for loads assigned via Planning Board UI.
       const load = await prisma.load.findFirst({
-        where: { id: loadId, driverId: driver.id }
-      });
+        where: {
+          id: loadId,
+          OR: [
+            { driverId: driver.id },
+            { companyId: driver.companyId }
+          ]
+        }
+      }).catch(() => null);
       if (!load) return sendError(res, { code: 'FORBIDDEN', message: 'You do not have permission to add items to this load' }, 403);
 
       // Phase 2: link customerId to the item (connects to Customer table via FK)
@@ -1354,11 +1366,14 @@ exports.addPickupItem = async (req, res, next) => {
         description: makeModel || 'Vehicle Freight',
         category: drop || undefined,
         rego: plate || 'UNREGISTERED',
-        status: 'PICKED_UP'
+        // Fix: was 'PICKED_UP' — new items must start as PENDING
+        // Driver taps the checkmark manually to mark as picked up via updatePickupItemStatus
+        status: 'PENDING'
       };
       if (customerId) {
         itemData.customerId = customerId;
       }
+
 
       createdItem = await prisma.loadItem.create({
         data: itemData,
@@ -1404,7 +1419,8 @@ exports.updatePickupItem = async (req, res, next) => {
     const driver = await resolveDriver(req);
     if (!driver) return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
     const { id } = req.params;
-    const { makeModel, vin, plate, drop } = req.body;
+    // Fix: now accepts customerId so Edit modal customer reassignment is saved to DB
+    const { makeModel, vin, plate, drop, customerId } = req.body;
 
     let updated = null;
     if (prisma.loadItem && id) {
@@ -1412,14 +1428,25 @@ exports.updatePickupItem = async (req, res, next) => {
       const make = parts[0] || 'Vehicle';
       const model = parts.slice(1).join(' ') || '';
 
+      // Fix: use company-scope OR driver-scope permission (consistent with other endpoints)
       updated = await prisma.loadItem.updateMany({
-        where: { id, load: { driverId: driver.id } },
+        where: {
+          id,
+          load: {
+            OR: [
+              { driverId: driver.id },
+              { companyId: driver.companyId }
+            ]
+          }
+        },
         data: {
           make,
           model,
           vin: vin || undefined,
           rego: plate || undefined,
-          category: drop || undefined
+          category: drop || undefined,
+          // Fix: save customer reassignment to DB when driver edits an item
+          ...(customerId !== undefined && { customerId: customerId || null })
         }
       }).catch(() => null);
     }
@@ -1439,10 +1466,19 @@ exports.scanVinCode = async (req, res, next) => {
 
     if (!vin) return sendError(res, { code: 'VALIDATION_ERROR', message: 'VIN is required' }, 400);
 
+    // Fix: normalize VIN to uppercase for consistent comparison
+    const normalizedVin = vin.trim().toUpperCase();
+
+    // Fix: use mode:'insensitive' + OR company-scope fallback so planning-board loads work
     const loadItem = await prisma.loadItem.findFirst({
       where: {
-        vin: { equals: vin.trim() },
-        load: { driverId: driver.id }
+        vin: { equals: normalizedVin, mode: 'insensitive' },
+        load: {
+          OR: [
+            { driverId: driver.id },
+            { companyId: driver.companyId }
+          ]
+        }
       }
     }).catch(() => null);
 
@@ -1456,14 +1492,14 @@ exports.scanVinCode = async (req, res, next) => {
         success: true,
         assigned: true,
         item: loadItem,
-        message: `VIN: ${vin} verified and marked as Picked Up!`
+        message: `VIN: ${normalizedVin} verified and marked as Picked Up!`
       });
     } else {
       return sendSuccess(res, {
         success: false,
         assigned: false,
-        vin,
-        message: `VIN: ${vin} is NOT assigned to this pickup load.`
+        vin: normalizedVin,
+        message: `VIN: ${normalizedVin} is NOT assigned to this pickup load.`
       });
     }
   } catch (error) {
