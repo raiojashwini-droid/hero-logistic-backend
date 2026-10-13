@@ -709,172 +709,156 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
   try {
     if (!loadId) return null;
 
-    // 1. Idempotency Check: Check if invoice already exists for this load
-    const existingInvoice = await prisma.customerInvoice.findFirst({
-      where: { loadId }
-    }).catch(() => null);
-
-    if (existingInvoice) {
-      return existingInvoice;
-    }
-
-    // 2. Fetch Target Load
+    // 1. Fetch Target Load with billedCustomers + items (Phase 8: multi-customer support)
     const targetLoad = await prisma.load.findUnique({
       where: { id: loadId },
-      include: { customer: true, items: true }
+      include: {
+        customer: true,
+        billedCustomers: { select: { id: true, name: true, email: true } },
+        items: { select: { id: true, customerId: true, quantity: true, weightKg: true } }
+      }
     }).catch(() => null);
 
     if (!targetLoad) return null;
 
     // Evaluate Billing Readiness
     const PricingService = require('../services/PricingService');
-    const billingStatus = await PricingService.evaluateBillingStatus(loadId);
-    
-    if (billingStatus !== 'READY_TO_INVOICE') {
-      return null; // Not ready to invoice yet
-    }
+    const billingStatus = await PricingService.evaluateBillingStatus(loadId).catch(() => 'READY_TO_INVOICE');
+    if (billingStatus !== 'READY_TO_INVOICE') return null;
 
-    // Check Customer Billing Rules for Grouping
-    const billingRule = await prisma.customerBillingRule.findFirst({
-      where: { customerId: targetLoad.customerId }
-    }).catch(() => null);
-
-    if (billingRule && !billingRule.autoCreateInvoice) {
-       return null; // Auto-invoicing disabled for this customer
-    }
-
-    if (billingRule && (billingRule.requireManualApproval || billingRule.approvalRequired)) {
-       return null; // Requires Accounts Manual Approval - do not auto generate!
-    }
-
-    if (billingRule && ['weekly', 'monthly', 'fortnightly'].includes((billingRule.invoiceGrouping || '').toLowerCase())) {
-       // Grouping rule prevents immediate per-load invoicing. A separate cron job handles this.
-       return null; 
-    }
-
-    // 3. Customer Resolution
-    let customerId = targetLoad.customerId;
     const targetCompanyId = companyId || targetLoad.companyId;
-    if (!customerId) {
-      let cust = await prisma.customer.findFirst({
-        where: targetCompanyId ? { companyId: targetCompanyId } : {}
-      }).catch(() => null);
 
-      if (!cust && targetCompanyId) {
+    // 2. Phase 8: Determine which customers to invoice
+    let customersToInvoice = [];
+    if (targetLoad.billedCustomers && targetLoad.billedCustomers.length > 0) {
+      customersToInvoice = targetLoad.billedCustomers;
+    } else if (targetLoad.customer) {
+      customersToInvoice = [targetLoad.customer];
+    } else if (targetLoad.customerId) {
+      const primaryCust = await prisma.customer.findUnique({
+        where: { id: targetLoad.customerId },
+        select: { id: true, name: true, email: true }
+      }).catch(() => null);
+      if (primaryCust) customersToInvoice = [primaryCust];
+    }
+
+    // Fallback: find or create a general customer
+    if (customersToInvoice.length === 0 && targetCompanyId) {
+      let cust = await prisma.customer.findFirst({ where: { companyId: targetCompanyId } }).catch(() => null);
+      if (!cust) {
         const crypto = require('crypto');
         cust = await prisma.customer.create({
-          data: {
-            id: crypto.randomUUID(),
-            companyId: targetCompanyId,
-            name: 'General Freight Customer',
-            email: 'accounts@generalcustomer.com.au'
-          }
+          data: { id: crypto.randomUUID(), companyId: targetCompanyId, name: 'General Freight Customer', email: 'accounts@generalcustomer.com.au' }
         }).catch(() => null);
       }
-
-      if (cust) customerId = cust.id;
+      if (cust) customersToInvoice = [cust];
     }
 
-    if (!customerId) return null;
+    if (customersToInvoice.length === 0) return null;
 
-    // 4. Rate / Amount Calculation
-    let amount = customAmount ? parseFloat(customAmount) : 0;
+    // 3. Billing Rules check
+    const ruleCustomerId = targetLoad.customerId || customersToInvoice[0]?.id;
+    const billingRule = await prisma.customerBillingRule.findFirst({ where: { customerId: ruleCustomerId } }).catch(() => null);
+    if (billingRule && !billingRule.autoCreateInvoice) return null;
+    if (billingRule && (billingRule.requireManualApproval || billingRule.approvalRequired)) return null;
+    if (billingRule && ['weekly', 'monthly', 'fortnightly'].includes((billingRule.invoiceGrouping || '').toLowerCase())) return null;
+
+    // 4. Calculate total load amount
+    let totalAmount = customAmount ? parseFloat(customAmount) : 0;
     let snap = null;
     if (targetLoad.pricingSnapshot) {
       snap = typeof targetLoad.pricingSnapshot === 'string' ? JSON.parse(targetLoad.pricingSnapshot) : targetLoad.pricingSnapshot;
     }
-
-    if (!amount || amount === 0) {
+    if (!totalAmount || totalAmount === 0) {
       if (snap && (snap.totalIncGst || snap.totalExGst)) {
-        amount = snap.totalIncGst || snap.totalExGst;
+        totalAmount = snap.totalIncGst || snap.totalExGst;
       } else if (targetLoad.notes && targetLoad.notes.includes('[AGREED_RATE:')) {
         const match = targetLoad.notes.match(/\[AGREED_RATE:([0-9.]+)/);
-        if (match && match[1]) amount = parseFloat(match[1]);
+        if (match && match[1]) totalAmount = parseFloat(match[1]);
       }
     }
-    if (!amount || amount === 0) {
-      const itemsCount = targetLoad.items?.length || 1;
-      amount = itemsCount * 350.00;
-      if (amount < 500) amount = 1250.00;
-    }
-
-    // Build line items from snapshot if available
-    let invoiceItems = [];
-    if (snap && snap.baseCharge) {
-      const baseSub = Math.round((snap.baseCharge || (amount / 1.1)) * 100) / 100;
-      invoiceItems.push({
-        desc: `Linehaul Freight Base Rate (${snap.pricingMethod || 'Per Load'})`,
-        qty: snap.quantity || 1,
-        rate: snap.unitPrice || baseSub,
-        amount: baseSub,
-        gst: Math.round((baseSub * 0.10) * 100) / 100,
-        total: Math.round((baseSub * 1.10) * 100) / 100
-      });
-      if (snap.fuelLevyAmount && snap.fuelLevyAmount > 0) {
-        const fuelGst = Math.round((snap.fuelLevyAmount * 0.10) * 100) / 100;
-        invoiceItems.push({
-          desc: `Fuel Levy Surcharge (${snap.fuelLevyPercent || 0}%)`,
-          qty: 1,
-          rate: snap.fuelLevyAmount,
-          amount: snap.fuelLevyAmount,
-          gst: fuelGst,
-          total: Math.round((snap.fuelLevyAmount + fuelGst) * 100) / 100
-        });
-      }
-      if (snap.surchargesTotal && snap.surchargesTotal > 0) {
-        const surGst = Math.round((snap.surchargesTotal * 0.10) * 100) / 100;
-        invoiceItems.push({
-          desc: `Applicable Accessorial Surcharges (Tolls / Stops / DG)`,
-          qty: 1,
-          rate: snap.surchargesTotal,
-          amount: snap.surchargesTotal,
-          gst: surGst,
-          total: Math.round((snap.surchargesTotal + surGst) * 100) / 100
-        });
-      }
-    } else {
-      const sub = Math.round((amount / 1.10) * 100) / 100;
-      const gstAmt = Math.round((amount - sub) * 100) / 100;
-      invoiceItems.push({
-        desc: `Freight Transport Services - Load ${targetLoad.loadRef || targetLoad.id}`,
-        qty: 1,
-        rate: sub,
-        amount: sub,
-        gst: gstAmt,
-        total: amount
-      });
+    const totalItemCount = targetLoad.items?.length || 1;
+    if (!totalAmount || totalAmount === 0) {
+      totalAmount = totalItemCount * 350.00;
+      if (totalAmount < 500) totalAmount = 1250.00;
     }
 
-    // 5. Generate Invoice Number & Due Date (14 Days)
+    // 5. Phase 8: Loop — create one invoice per billed customer
     const crypto = require('crypto');
-    const invNum = `INV-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 14);
+    const createdInvoices = [];
+    const isMultiCustomer = customersToInvoice.length > 1;
 
-    // 6. Create CustomerInvoice (status: DRAFT)
-    const invoice = await prisma.customerInvoice.create({
-      data: {
-        id: crypto.randomUUID(),
-        invoiceNumber: invNum,
-        customerId,
-        loadId: targetLoad.id,
-        amount,
-        appliedTaxRate: snap?.gstPercent === 0 ? 0 : 0.10,
-        items: invoiceItems,
-        type: 'Freight',
-        status: 'DRAFT',
-        dueDate,
-        notes: `Auto-generated draft invoice upon POD delivery confirmation for Load ${targetLoad.loadRef || targetLoad.id}`
-      },
-      include: { customer: { select: { id: true, name: true, email: true } } }
-    });
+    for (const customer of customersToInvoice) {
+      // Idempotency: one invoice per customer+load combo
+      const existingInvoice = await prisma.customerInvoice.findFirst({
+        where: { loadId, customerId: customer.id }
+      }).catch(() => null);
+      if (existingInvoice) { createdInvoices.push(existingInvoice); continue; }
 
-    return invoice;
+      // Calculate this customer's share
+      let customerAmount = totalAmount;
+      if (isMultiCustomer) {
+        const customerItems = (targetLoad.items || []).filter(i => i.customerId === customer.id);
+        if (customerItems.length > 0) {
+          if (snap && snap.pricingMethod && snap.pricingMethod.toLowerCase().includes('vehicle')) {
+            const unitPrice = snap.unitPrice || (totalAmount / totalItemCount);
+            customerAmount = Math.round(customerItems.length * unitPrice * 100) / 100;
+          } else {
+            customerAmount = Math.round((customerItems.length / totalItemCount) * totalAmount * 100) / 100;
+          }
+        } else {
+          customerAmount = Math.round((totalAmount / customersToInvoice.length) * 100) / 100;
+        }
+      }
+
+      // Build line items
+      let invoiceItems = [];
+      if (isMultiCustomer) {
+        const custItems = (targetLoad.items || []).filter(i => i.customerId === customer.id);
+        const itemCount = custItems.length > 0 ? custItems.length : Math.ceil(totalItemCount / customersToInvoice.length);
+        const sub = Math.round((customerAmount / 1.10) * 100) / 100;
+        invoiceItems.push({ desc: `Transport Services - ${itemCount} item(s) for ${customer.name} (Load ${targetLoad.loadRef || targetLoad.id})`, qty: itemCount, rate: Math.round((sub / itemCount) * 100) / 100, amount: sub, gst: Math.round((customerAmount - sub) * 100) / 100, total: customerAmount });
+      } else if (snap && snap.baseCharge) {
+        const baseSub = Math.round((snap.baseCharge || (totalAmount / 1.1)) * 100) / 100;
+        invoiceItems.push({ desc: `Linehaul Freight Base Rate (${snap.pricingMethod || 'Per Load'})`, qty: snap.quantity || 1, rate: snap.unitPrice || baseSub, amount: baseSub, gst: Math.round((baseSub * 0.10) * 100) / 100, total: Math.round((baseSub * 1.10) * 100) / 100 });
+        if (snap.fuelLevyAmount > 0) { const fg = Math.round((snap.fuelLevyAmount * 0.10) * 100) / 100; invoiceItems.push({ desc: `Fuel Levy Surcharge (${snap.fuelLevyPercent || 0}%)`, qty: 1, rate: snap.fuelLevyAmount, amount: snap.fuelLevyAmount, gst: fg, total: Math.round((snap.fuelLevyAmount + fg) * 100) / 100 }); }
+        if (snap.surchargesTotal > 0) { const sg = Math.round((snap.surchargesTotal * 0.10) * 100) / 100; invoiceItems.push({ desc: `Applicable Accessorial Surcharges`, qty: 1, rate: snap.surchargesTotal, amount: snap.surchargesTotal, gst: sg, total: Math.round((snap.surchargesTotal + sg) * 100) / 100 }); }
+      } else {
+        const sub = Math.round((customerAmount / 1.10) * 100) / 100;
+        invoiceItems.push({ desc: `Freight Transport Services - Load ${targetLoad.loadRef || targetLoad.id}`, qty: 1, rate: sub, amount: sub, gst: Math.round((customerAmount - sub) * 100) / 100, total: customerAmount });
+      }
+
+      const invNum = `INV-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+      const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 14);
+
+      const invoice = await prisma.customerInvoice.create({
+        data: {
+          id: crypto.randomUUID(),
+          invoiceNumber: invNum,
+          customerId: customer.id,
+          loadId: targetLoad.id,
+          amount: customerAmount,
+          appliedTaxRate: snap?.gstPercent === 0 ? 0 : 0.10,
+          items: invoiceItems,
+          type: 'Freight',
+          status: 'DRAFT',
+          dueDate,
+          notes: isMultiCustomer
+            ? `Auto-generated draft for ${customer.name} — multi-customer load ${targetLoad.loadRef || targetLoad.id}`
+            : `Auto-generated draft invoice upon POD delivery confirmation for Load ${targetLoad.loadRef || targetLoad.id}`
+        },
+        include: { customer: { select: { id: true, name: true, email: true } } }
+      });
+      createdInvoices.push(invoice);
+    }
+
+
   } catch (err) {
     console.error('Error in autoGenerateLoadInvoice:', err?.message);
     return null;
   }
 };
+
 
 exports.syncUncreditedDeliveredLoads = async (companyId = null) => {
   try {
