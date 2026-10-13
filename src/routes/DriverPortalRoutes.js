@@ -23,6 +23,8 @@ router.post('/checklists', DriverPortalController.submitChecklist);
 // Added routes for Driver Dashboard Pickup & Loading API
 router.get('/payroll', DriverPortalController.getPayroll);
 router.get('/pickup-load', DriverPortalController.getPickupLoad);
+// Phase 1: Customer list for a specific load (powers Driver Add Item dropdown)
+router.get('/pickup-load/customers', DriverPortalController.getPickupCustomers);
 router.post('/pickup-load/item-status', DriverPortalController.updatePickupItemStatus);
 router.post('/pickup-load/add-item', DriverPortalController.addPickupItem);
 router.put('/pickup-load/item/:id', DriverPortalController.updatePickupItem);

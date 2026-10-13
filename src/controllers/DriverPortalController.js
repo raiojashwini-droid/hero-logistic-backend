@@ -1160,7 +1160,9 @@ exports.getPickupLoad = async (req, res, next) => {
         },
         include: {
           stops: { orderBy: { sequenceIndex: 'asc' } },
-          items: true
+          // Phase 3: include customer data per item
+          items: { include: { customer: { select: { id: true, name: true, contactName: true, email: true, phone: true } } } },
+          billedCustomers: { select: { id: true, name: true, contactName: true, email: true, phone: true } }
         },
         orderBy: { createdAt: 'desc' }
       }).catch(() => null);
@@ -1173,7 +1175,8 @@ exports.getPickupLoad = async (req, res, next) => {
           },
           include: {
             stops: { orderBy: { sequenceIndex: 'asc' } },
-            items: true
+            items: { include: { customer: { select: { id: true, name: true, contactName: true, email: true, phone: true } } } },
+            billedCustomers: { select: { id: true, name: true, contactName: true, email: true, phone: true } }
           },
           orderBy: { createdAt: 'desc' }
         }).catch(() => null);
@@ -1197,6 +1200,7 @@ exports.getPickupLoad = async (req, res, next) => {
       destination = load.destination || '—';
     }
 
+    // Phase 3: map items with customer info
     const cars = (load.items || []).map((item, index) => ({
       id: item.id,
       dbId: item.id,
@@ -1208,7 +1212,11 @@ exports.getPickupLoad = async (req, res, next) => {
       plate: item.rego || `REG-${index + 1}`,
       pickedUp: item.status === 'PICKED_UP' || item.status === 'LOADED' || item.status === 'DELIVERED',
       time: item.status === 'PICKED_UP' || item.status === 'LOADED' ? (item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '08:12 AM') : null,
-      photos: { current: item.status === 'PICKED_UP' ? 4 : 0, total: 4, percent: item.status === 'PICKED_UP' ? 100 : 0 }
+      photos: { current: item.status === 'PICKED_UP' ? 4 : 0, total: 4, percent: item.status === 'PICKED_UP' ? 100 : 0 },
+      // Customer fields for multi-customer support
+      customerId: item.customerId || null,
+      customerName: item.customer?.name || null,
+      customerContact: item.customer?.contactName || null
     }));
 
     const responseData = {
@@ -1218,10 +1226,59 @@ exports.getPickupLoad = async (req, res, next) => {
       destination,
       pickupTime: load.loadDate ? new Date(load.loadDate).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : '—',
       estFinish: '—',
-      cars
+      cars,
+      // Phase 1: send list of customers linked to this load for the dropdown
+      customers: (load.billedCustomers || []).length > 0 ? load.billedCustomers : []
     };
 
     return sendSuccess(res, { load: responseData });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================================
+// Phase 1: GET CUSTOMERS FOR PICKUP LOAD (for Driver dropdown)
+// ============================================================================
+exports.getPickupCustomers = async (req, res, next) => {
+  try {
+    const driver = await resolveDriver(req);
+    if (!driver) return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
+
+    const { loadId } = req.query;
+    let customers = [];
+
+    if (loadId && prisma.load) {
+      // Get customers linked directly to this load
+      const load = await prisma.load.findFirst({
+        where: { id: loadId, driverId: driver.id },
+        include: {
+          billedCustomers: { select: { id: true, name: true, contactName: true, phone: true } },
+          customer: { select: { id: true, name: true, contactName: true, phone: true } }
+        }
+      }).catch(() => null);
+
+      if (load) {
+        const fromBilled = load.billedCustomers || [];
+        const fromPrimary = load.customer ? [load.customer] : [];
+        // Merge + deduplicate
+        const merged = [...fromPrimary, ...fromBilled];
+        const seen = new Set();
+        customers = merged.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+      }
+    }
+
+    // Fallback: return all active company customers if no load-specific ones found
+    if (customers.length === 0 && driver.companyId) {
+      customers = await prisma.customer.findMany({
+        where: { companyId: driver.companyId, status: 'ACTIVE' },
+        select: { id: true, name: true, contactName: true, phone: true },
+        orderBy: { name: 'asc' },
+        take: 50
+      }).catch(() => []);
+    }
+
+    return sendSuccess(res, { customers });
   } catch (error) {
     next(error);
   }
@@ -1273,7 +1330,8 @@ exports.addPickupItem = async (req, res, next) => {
   try {
     const driver = await resolveDriver(req);
     if (!driver) return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
-    const { loadId, vin, makeModel, plate, drop } = req.body;
+    // Phase 2: accept customerId from request body
+    const { loadId, vin, makeModel, plate, drop, customerId } = req.body;
 
     if (!loadId) return sendError(res, { code: 'VALIDATION_ERROR', message: 'Load ID is required' }, 400);
 
@@ -1284,19 +1342,33 @@ exports.addPickupItem = async (req, res, next) => {
       });
       if (!load) return sendError(res, { code: 'FORBIDDEN', message: 'You do not have permission to add items to this load' }, 403);
 
+      // Phase 2: link customerId to the item (connects to Customer table via FK)
+      const itemData = {
+        loadId,
+        vin: vin || `VIN-${Date.now().toString().slice(-6)}`,
+        description: makeModel || 'Vehicle Freight',
+        category: drop || undefined,
+        rego: plate || 'UNREGISTERED',
+        status: 'PICKED_UP'
+      };
+      if (customerId) {
+        itemData.customerId = customerId;
+      }
+
       createdItem = await prisma.loadItem.create({
-        data: {
-          loadId,
-          vin: vin || `VIN-${Date.now().toString().slice(-6)}`,
-          description: makeModel || 'Vehicle Freight',
-          rego: plate || 'UNREGISTERED',
-          status: 'PICKED_UP'
-        }
+        data: itemData,
+        include: { customer: { select: { id: true, name: true, contactName: true } } }
       }).catch(() => null);
     }
 
     if (!createdItem) return sendError(res, { code: 'INTERNAL_ERROR', message: 'Could not create item' }, 500);
-    return sendSuccess(res, { success: true, item: createdItem });
+    return sendSuccess(res, {
+      success: true,
+      item: {
+        ...createdItem,
+        customerName: createdItem.customer?.name || null
+      }
+    });
   } catch (error) {
     next(error);
   }
