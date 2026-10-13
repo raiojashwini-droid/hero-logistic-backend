@@ -115,8 +115,7 @@ const ALLOWED_LOAD_FIELDS = new Set([
   'incidents',
   'pricingSnapshot',
   'pricingStatus',
-  'billingStatus',
-  'billedCustomers'
+  'billingStatus'
 ]);
 
 const cleanLoadPayload = (rawPayload) => {
@@ -125,7 +124,7 @@ const cleanLoadPayload = (rawPayload) => {
   const relationKeys = new Set([
     'stops', 'items', 'expenses', 'documents', 'activities',
     'invoices', 'itemMovements', 'messages', 'vinScanEvents',
-    'deliveryPods', 'preStartChecklists', 'incidents', 'billedCustomers'
+    'deliveryPods', 'preStartChecklists', 'incidents'
   ]);
 
   for (const [key, val] of Object.entries(rawPayload)) {
@@ -154,15 +153,7 @@ exports.getLoads = async (req, res, next) => {
     const [data, total] = await Promise.all([
       prisma.load.findMany({
         where, skip, take, orderBy,
-        include: {
-          driver: { include: { user: true } },
-          truck: true,
-          trailer: true,
-          customer: true,
-          billedCustomers: true,
-          stops: { orderBy: { sequenceIndex: 'asc' } },
-          items: { include: { customer: true } }
-        }
+        include: { driver: true, truck: true, trailer: true, customer: true, stops: true, items: true }
       }),
       prisma.load.count({ where })
     ]);
@@ -171,22 +162,7 @@ exports.getLoads = async (req, res, next) => {
       let uiStatus = item.status;
       if (item.status === 'IN_TRANSIT') uiStatus = 'ACTIVE';
       if (item.status === 'DELIVERED') uiStatus = 'COMPLETED';
-      const pickups = item.stops?.filter(s => s.type === 'PICKUP') || [];
-      const deliveries = item.stops?.filter(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || [];
-      const origin = pickups[0]?.address || item.stops?.[0]?.address || '—';
-      const destination = deliveries[deliveries.length - 1]?.address || item.stops?.[item.stops.length - 1]?.address || '—';
-      const driverName = item.driver?.user?.name || (item.driver ? `${item.driver.firstName || ''} ${item.driver.lastName || ''}`.trim() : null) || 'Unassigned';
-      const pickupDate = item.loadDate ? new Date(item.loadDate).toLocaleDateString('en-GB') : (item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-GB') : 'Today');
-      const deliveryDate = item.deliveryEta ? new Date(item.deliveryEta).toLocaleDateString('en-GB') : 'Tomorrow';
-      return {
-        ...item,
-        status: uiStatus,
-        origin,
-        destination,
-        driverName,
-        pickupDate,
-        deliveryDate
-      };
+      return { ...item, status: uiStatus };
     });
 
     const meta = buildPaginationMeta(total, currentPage, pageSize, req.query.sort);
@@ -256,26 +232,22 @@ exports.createLoad = async (req, res, next) => {
     }
 
     // Resolve Driver
-    const driverInput = payload.driver || payload.driverName || rawPayload.driverName || null;
-    if (driverInput && !payload.driverId) {
-      if (typeof driverInput === 'string' && driverInput !== 'Unassigned') {
+    if (payload.driver && !payload.driverId) {
+      if (typeof payload.driver === 'string') {
         const foundDriver = await prisma.driver.findFirst({
           where: {
             OR: [
-              { id: driverInput },
-              { user: { name: { contains: driverInput } } },
-              { firstName: { contains: driverInput } },
-              { lastName: { contains: driverInput } }
+              { id: payload.driver },
+              { user: { name: { contains: payload.driver } } }
             ]
           }
         });
         if (foundDriver) payload.driverId = foundDriver.id;
-      } else if (driverInput?.id) {
-        payload.driverId = driverInput.id;
+      } else if (payload.driver?.id) {
+        payload.driverId = payload.driver.id;
       }
     }
     delete payload.driver;
-    delete payload.driverName;
 
     // Resolve Vehicle / Truck
     if (payload.vehicleId && !payload.truckId) {
@@ -359,9 +331,6 @@ exports.createLoad = async (req, res, next) => {
       delete payload.documents;
     }
 
-    const pickupLoc = rawPayload.pickupLocation || rawPayload.pickupAddress || rawPayload.origin || null;
-    const deliveryLoc = rawPayload.deliveryLocation || rawPayload.deliveryAddress || rawPayload.destination || null;
-
     if (Array.isArray(stops) && stops.length > 0) {
       payload.stops = {
         create: stops.map((s, idx) => {
@@ -378,27 +347,6 @@ exports.createLoad = async (req, res, next) => {
           };
         })
       };
-    } else if (pickupLoc || deliveryLoc) {
-      const stopsData = [];
-      if (pickupLoc) {
-        stopsData.push({
-          type: 'PICKUP',
-          sequenceIndex: 0,
-          address: pickupLoc,
-          contactName: rawPayload.pickupContact || null,
-          contactPhone: rawPayload.pickupPhone || null
-        });
-      }
-      if (deliveryLoc) {
-        stopsData.push({
-          type: 'DROPOFF',
-          sequenceIndex: stopsData.length,
-          address: deliveryLoc,
-          contactName: rawPayload.deliveryContact || null,
-          contactPhone: rawPayload.deliveryPhone || null
-        });
-      }
-      payload.stops = { create: stopsData };
     }
 
     if (Array.isArray(items) && items.length > 0) {
@@ -415,24 +363,9 @@ exports.createLoad = async (req, res, next) => {
           color: item.colour || item.color || null,
           quantity: item.quantity ? parseInt(String(item.quantity).replace(/[^0-9]/g, ''), 10) || 1 : 1,
           weightKg: item.weightValue || (item.weight ? parseInt(String(item.weight).replace(/[^0-9]/g, ''), 10) || 0 : 0),
-          customerId: item.customerId || payload.customerId || null,
+          customerId: item.customerId || null,
           notes: typeof item.notes === 'string' ? item.notes : (item.details || JSON.stringify(item))
         }))
-      };
-    } else {
-      const cargoName = rawPayload.cargoType || rawPayload.type || 'General Freight';
-      const qty = parseInt(rawPayload.quantity || 1, 10) || 1;
-      const wt = rawPayload.weight ? parseInt(String(rawPayload.weight).replace(/[^0-9]/g, ''), 10) || 0 : 0;
-      payload.items = {
-        create: [{
-          stockRef: `REF-${Math.floor(1000 + Math.random() * 9000)}`,
-          description: cargoName,
-          category: cargoName,
-          quantity: qty,
-          weightKg: wt,
-          customerId: payload.customerId || null,
-          notes: rawPayload.notes || null
-        }]
       };
     }
 
@@ -465,14 +398,7 @@ exports.createLoad = async (req, res, next) => {
 
     const data = await prisma.load.create({
       data: cleanedData,
-      include: {
-        driver: { include: { user: true } },
-        truck: true,
-        customer: true,
-        billedCustomers: true,
-        stops: true,
-        items: { include: { customer: true } }
-      }
+      include: { driver: true, truck: true, customer: true, stops: true, items: true }
     });
 
     // If agreed customer rate provided at load creation, pre-create Draft CustomerInvoice

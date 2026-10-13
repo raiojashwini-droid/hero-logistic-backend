@@ -37,37 +37,21 @@ exports.getAll = async (req, res, next) => {
       prisma.load.findMany({
         where, skip, take, orderBy,
         include: {
-          driver: { include: { user: true } },
+          driver: true,
           truck: true,
           activities: true,
           trailer: true,
           customer: true,
           billedCustomers: true,
-          stops: { orderBy: { sequenceIndex: 'asc' } },
+          stops: true,
           items: { include: { customer: true } }
         }
       }),
       prisma.load.count({ where })
     ]);
 
-    const mappedData = data.map(ld => {
-      const pickups = ld.stops?.filter(s => s.type === 'PICKUP') || [];
-      const deliveries = ld.stops?.filter(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || [];
-      const origin = pickups[0]?.address || ld.stops?.[0]?.address || '—';
-      const destination = deliveries[deliveries.length - 1]?.address || ld.stops?.[ld.stops.length - 1]?.address || '—';
-      const driverName = ld.driver?.user?.name || (ld.driver ? `${ld.driver.firstName || ''} ${ld.driver.lastName || ''}`.trim() : null) || 'Unassigned';
-      return {
-        ...ld,
-        origin,
-        destination,
-        driverName,
-        pickupDate: ld.loadDate ? new Date(ld.loadDate).toLocaleDateString('en-GB') : (ld.createdAt ? new Date(ld.createdAt).toLocaleDateString('en-GB') : 'Today'),
-        deliveryDate: ld.deliveryEta ? new Date(ld.deliveryEta).toLocaleDateString('en-GB') : 'Tomorrow'
-      };
-    });
-
     const meta = buildPaginationMeta(total, currentPage, pageSize, req.query.sort);
-    return sendList(res, mappedData, meta);
+    return sendList(res, data, meta);
   } catch (error) {
     next(error);
   }
