@@ -1249,9 +1249,13 @@ exports.getPickupCustomers = async (req, res, next) => {
     let customers = [];
 
     if (loadId && prisma.load) {
-      // Get customers linked directly to this load
+      // Fix: removed driverId filter — load may not yet be assigned to this driver
+      // but driver is authenticated via JWT so company-scoped access is safe
       const load = await prisma.load.findFirst({
-        where: { id: loadId, driverId: driver.id },
+        where: {
+          id: loadId,
+          ...(driver.companyId && { companyId: driver.companyId })
+        },
         include: {
           billedCustomers: { select: { id: true, name: true, contactName: true, phone: true } },
           customer: { select: { id: true, name: true, contactName: true, phone: true } }
@@ -1261,17 +1265,18 @@ exports.getPickupCustomers = async (req, res, next) => {
       if (load) {
         const fromBilled = load.billedCustomers || [];
         const fromPrimary = load.customer ? [load.customer] : [];
-        // Merge + deduplicate
+        // Merge + deduplicate by id
         const merged = [...fromPrimary, ...fromBilled];
         const seen = new Set();
         customers = merged.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
       }
     }
 
-    // Fallback: return all active company customers if no load-specific ones found
+    // Fallback: return all company customers if no load-specific ones found
+    // Fix: removed status:'ACTIVE' filter so newly created customers also appear
     if (customers.length === 0 && driver.companyId) {
       customers = await prisma.customer.findMany({
-        where: { companyId: driver.companyId, status: 'ACTIVE' },
+        where: { companyId: driver.companyId },
         select: { id: true, name: true, contactName: true, phone: true },
         orderBy: { name: 'asc' },
         take: 50
