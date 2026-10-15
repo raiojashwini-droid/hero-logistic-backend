@@ -46,8 +46,13 @@ router.get('/drivers/:id/expenses', ctrl.getDriverExpenses);
 router.delete('/drivers/:id', ctrl.deleteDriver);
 
 // 5. Vehicles
+const VehicleController = require('../controllers/VehicleController');
 router.get('/vehicles', ctrl.getVehicles);
 router.post('/vehicles', ctrl.createVehicle);
+router.get('/vehicles/:id', VehicleController.getById);
+router.put('/vehicles/:id', VehicleController.update);
+router.delete('/vehicles/:id', VehicleController.delete);
+
 
 // 6. Branches — full CRUD
 router.get('/branches', ctrl.getBranches);

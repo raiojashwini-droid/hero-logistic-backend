@@ -563,8 +563,22 @@ exports.delete = async (req, res, next) => {
       }, HTTP_STATUS.NOT_FOUND);
     }
 
+    const vehId = existing.id;
+    // Clean up or unlink dependent records
+    if (prisma.telemetryLog) await prisma.telemetryLog.deleteMany({ where: { vehicleId: vehId } }).catch(() => {});
+    if (prisma.load) {
+      await prisma.load.updateMany({ where: { truckId: vehId }, data: { truckId: null } }).catch(() => {});
+      await prisma.load.updateMany({ where: { trailerId: vehId }, data: { trailerId: null } }).catch(() => {});
+    }
+    if (prisma.loadExpense) await prisma.loadExpense.updateMany({ where: { vehicleId: vehId }, data: { vehicleId: null } }).catch(() => {});
+    if (prisma.document) await prisma.document.updateMany({ where: { vehicleId: vehId }, data: { vehicleId: null } }).catch(() => {});
+    if (prisma.equipmentSwap) {
+      await prisma.equipmentSwap.updateMany({ where: { prevTrailerId: vehId }, data: { prevTrailerId: null } }).catch(() => {});
+      await prisma.equipmentSwap.updateMany({ where: { newTrailerId: vehId }, data: { newTrailerId: null } }).catch(() => {});
+    }
+
     await prisma.vehicle.delete({
-      where: { id: existing.id }
+      where: { id: vehId }
     });
     return sendSuccess(res, { id, message: 'Vehicle deleted successfully' });
   } catch (error) {

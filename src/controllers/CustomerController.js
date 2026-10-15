@@ -345,19 +345,18 @@ exports.delete = async (req, res, next) => {
     const custId = targetCustomer.id;
 
     // Delete or unlink all child dependent records cleanly prior to customer deletion
+    if (prisma.customerPricingProfile) await prisma.customerPricingProfile.deleteMany({ where: { customerId: custId } }).catch(() => {});
+    if (prisma.customerBillingRule) await prisma.customerBillingRule.deleteMany({ where: { customerId: custId } }).catch(() => {});
     if (prisma.customerInvoice) await prisma.customerInvoice.deleteMany({ where: { customerId: custId } }).catch(() => {});
-    if (prisma.loadItem) await prisma.loadItem.deleteMany({ where: { customerId: custId } }).catch(() => {});
-    if (prisma.inboundReceipt) await prisma.inboundReceipt.deleteMany({ where: { customerId: custId } }).catch(() => {});
-    if (prisma.load) {
-      const loads = await prisma.load.findMany({ where: { customerId: custId }, select: { id: true } }).catch(() => []);
-      const loadIds = loads.map(l => l.id);
-      if (loadIds.length > 0) {
-        if (prisma.routeStop) await prisma.routeStop.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
-        if (prisma.loadExpense) await prisma.loadExpense.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
-        if (prisma.loadActivity) await prisma.loadActivity.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
-        await prisma.load.deleteMany({ where: { id: { in: loadIds } } }).catch(() => {});
-      }
-    }
+    if (prisma.loadItem) await prisma.loadItem.updateMany({ where: { customerId: custId }, data: { customerId: null } }).catch(() => {});
+    if (prisma.load) await prisma.load.updateMany({ where: { customerId: custId }, data: { customerId: null } }).catch(() => {});
+    
+    // Disconnect implicit many-to-many billedCustomers relation
+    await prisma.customer.update({
+      where: { id: custId },
+      data: { billedLoads: { set: [] } }
+    }).catch(() => {});
+    await prisma.$executeRawUnsafe('DELETE FROM _LoadBilledCustomers WHERE B = ?', custId).catch(() => {});
 
     // Perform database deletion
     await prisma.customer.delete({ where: { id: custId } });
@@ -382,10 +381,14 @@ exports.deleteAll = async (req, res, next) => {
     const custIds = customers.map(c => c.id);
 
     if (custIds.length > 0) {
+      if (prisma.customerPricingProfile) await prisma.customerPricingProfile.deleteMany({ where: { customerId: { in: custIds } } }).catch(() => {});
+      if (prisma.customerBillingRule) await prisma.customerBillingRule.deleteMany({ where: { customerId: { in: custIds } } }).catch(() => {});
       if (prisma.customerInvoice) await prisma.customerInvoice.deleteMany({ where: { customerId: { in: custIds } } }).catch(() => {});
-      if (prisma.loadItem) await prisma.loadItem.deleteMany({ where: { customerId: { in: custIds } } }).catch(() => {});
-      if (prisma.inboundReceipt) await prisma.inboundReceipt.deleteMany({ where: { customerId: { in: custIds } } }).catch(() => {});
+      if (prisma.loadItem) await prisma.loadItem.updateMany({ where: { customerId: { in: custIds } }, data: { customerId: null } }).catch(() => {});
       if (prisma.load) await prisma.load.updateMany({ where: { customerId: { in: custIds } }, data: { customerId: null } }).catch(() => {});
+      for (const cid of custIds) {
+        await prisma.$executeRawUnsafe('DELETE FROM _LoadBilledCustomers WHERE B = ?', cid).catch(() => {});
+      }
       await prisma.customer.deleteMany({ where: { id: { in: custIds } } }).catch(() => {});
     }
 
