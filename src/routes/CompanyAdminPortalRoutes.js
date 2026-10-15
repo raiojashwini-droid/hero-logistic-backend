@@ -184,6 +184,10 @@ router.delete('/customers/:id', CustomerController.delete);
 // 20.1 Customer Pricing Profiles & Billing Rules
 router.get('/customers/:id/pricing-profiles', CustomerController.getPricingProfiles);
 router.post('/customers/:id/pricing-profiles', CustomerController.savePricingProfile);
+router.delete('/customers/:id/pricing-profiles/:profileId', CustomerController.deletePricingProfile);
+router.delete('/customers/:id/pricing-profiles', CustomerController.deletePricingProfile);
+router.delete('/customers/pricing-profiles/:profileId', CustomerController.deletePricingProfile);
+
 router.get('/customers/:id/surcharges', CustomerController.getSurcharges);
 router.post('/customers/:id/surcharges', CustomerController.saveSurcharge);
 router.delete('/customers/:id/surcharges/:surchargeId', CustomerController.deleteSurcharge);

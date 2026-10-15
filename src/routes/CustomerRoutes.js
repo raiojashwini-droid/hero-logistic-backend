@@ -34,6 +34,9 @@ router.route('/:id/pricing-profiles')
   .get(CustomerController.getPricingProfiles)
   .post(CustomerController.savePricingProfile);
 
+router.delete('/:id/pricing-profiles/:profileId', CustomerController.deletePricingProfile);
+
+
 router.route('/:id/surcharges')
   .get(CustomerController.getSurcharges)
   .post(CustomerController.saveSurcharge)

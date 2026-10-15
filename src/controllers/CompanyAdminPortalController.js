@@ -2237,10 +2237,11 @@ exports.getPricingStats = async (req, res, next) => {
     const companyId = await resolveCompanyId(req);
     const whereScope = companyId ? { companyId } : { companyId: 'IMPOSSIBLE_NO_TENANT_ACCESS' };
 
-    const [laneCount, vehicleRateCount, activeFuelLog] = await Promise.all([
+    const [laneCount, vehicleRateCount, activeFuelLog, customerCount] = await Promise.all([
       prisma.lanePricingRule.count({ where: { ...whereScope, status: 'Active' } }),
       prisma.vehicleTypeRate.count({ where: { ...whereScope, status: 'Active' } }),
-      prisma.fuelSurchargeLog.findFirst({ where: { ...whereScope, isActive: true }, orderBy: { createdAt: 'desc' } })
+      prisma.fuelSurchargeLog.findFirst({ where: { ...whereScope, isActive: true }, orderBy: { createdAt: 'desc' } }),
+      prisma.customer.count({ where: companyId ? { companyId } : {} })
     ]);
 
     const plans = await prisma.subscriptionPlan.findMany({ include: { planFeatures: { include: { feature: true } } } });
@@ -2250,6 +2251,7 @@ exports.getPricingStats = async (req, res, next) => {
       activeLanes: laneCount,
       vehicleClasses: vehicleRateCount,
       currentFuelRate: activeFuelLog ? activeFuelLog.rate : 14.5,
+      customerAccounts: customerCount,
       plans,
       currentSubscription: currentSub
     });
@@ -3441,9 +3443,62 @@ exports.getDocuments = async (req, res, next) => {
       ];
     }
 
-    // Category filter (stored in type field)
+    const DRIVER_TYPES = ['Driver Documents', 'Dangerous Goods Certificate', 'Heavy Vehicle Driver License', 'Driver Medical Certificate', 'Forklift License', 'Fatigue Management Certificate'];
+
+    // Category filter (stored in type field or mapped by association)
     if (category && category !== 'All Documents') {
-      where.type = category;
+      if (category === 'Driver Documents') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { type: { in: DRIVER_TYPES } },
+              { driverId: { not: null } }
+            ]
+          }
+        ];
+      } else if (category === 'Vehicle Documents') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { type: 'Vehicle Documents' },
+              { vehicleId: { not: null } },
+              { assetId: { not: null } }
+            ]
+          }
+        ];
+      } else if (category === 'Customer Documents') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { type: 'Customer Documents' },
+              { loadId: { not: null } }
+            ]
+          }
+        ];
+      } else if (category === 'Company Documents') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { type: 'Company Documents' },
+              {
+                AND: [
+                  { driverId: null },
+                  { vehicleId: null },
+                  { loadId: null },
+                  { assetId: null },
+                  { type: { notIn: [...DRIVER_TYPES, 'Vehicle Documents', 'Customer Documents'] } }
+                ]
+              }
+            ]
+          }
+        ];
+      } else {
+        where.type = category;
+      }
     }
 
     // Search filter (search in fileUrl as it contains title/name)
@@ -3480,7 +3535,7 @@ exports.getDocuments = async (req, res, next) => {
               ? `Asset: ${doc.asset.name}`
               : 'Company Wide',
       uploadedBy: 'System',
-      fileSize: 'â€” KB',
+      fileSize: '— KB',
       status: doc.expiryDate && new Date(doc.expiryDate) < new Date() ? 'Expired' : 'Active'
     }));
 
@@ -3505,11 +3560,70 @@ exports.getDocumentStats = async (req, res, next) => {
       ];
     }
 
+    const DRIVER_TYPES = ['Driver Documents', 'Dangerous Goods Certificate', 'Heavy Vehicle Driver License', 'Driver Medical Certificate', 'Forklift License', 'Fatigue Management Certificate'];
+
     const [company, driver, vehicle, customer, total] = await Promise.all([
-      prisma.document.count({ where: { ...baseWhere, type: 'Company Documents' } }),
-      prisma.document.count({ where: { ...baseWhere, type: 'Driver Documents' } }),
-      prisma.document.count({ where: { ...baseWhere, type: 'Vehicle Documents' } }),
-      prisma.document.count({ where: { ...baseWhere, type: 'Customer Documents' } }),
+      prisma.document.count({
+        where: {
+          AND: [
+            baseWhere,
+            {
+              OR: [
+                { type: 'Company Documents' },
+                {
+                  AND: [
+                    { driverId: null },
+                    { vehicleId: null },
+                    { loadId: null },
+                    { assetId: null },
+                    { type: { notIn: [...DRIVER_TYPES, 'Vehicle Documents', 'Customer Documents'] } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }),
+      prisma.document.count({
+        where: {
+          AND: [
+            baseWhere,
+            {
+              OR: [
+                { type: { in: DRIVER_TYPES } },
+                { driverId: { not: null } }
+              ]
+            }
+          ]
+        }
+      }),
+      prisma.document.count({
+        where: {
+          AND: [
+            baseWhere,
+            {
+              OR: [
+                { type: 'Vehicle Documents' },
+                { vehicleId: { not: null } },
+                { assetId: { not: null } }
+              ]
+            }
+          ]
+        }
+      }),
+      prisma.document.count({
+        where: {
+          AND: [
+            baseWhere,
+            {
+              OR: [
+                { type: 'Customer Documents' },
+                { loadId: { not: null } }
+              ]
+            }
+          ]
+        }
+      }),
       prisma.document.count({ where: baseWhere })
     ]);
 

@@ -746,6 +746,18 @@ exports.savePricingProfile = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
+exports.deletePricingProfile = async (req, res, next) => {
+  try {
+    const profileId = req.params.profileId || req.params.id || req.body?.profileId;
+    if (!profileId) {
+      return sendError(res, 'Pricing Profile ID is required', HTTP_STATUS.BAD_REQUEST);
+    }
+    await prisma.customerPricingProfile.deleteMany({ where: { id: profileId } });
+    return sendSuccess(res, { message: 'Customer pricing profile deleted successfully' });
+  } catch (error) { next(error); }
+};
+
+
 // --- DB-Backed Billing Rules ---
 
 exports.getSurcharges = async (req, res, next) => {

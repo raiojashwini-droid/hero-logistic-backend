@@ -122,10 +122,10 @@ exports.getAll = async (req, res, next) => {
     // Order by hierarchy rank
     merged.sort((a, b) => (ROLE_HIERARCHY[a.slug] || 99) - (ROLE_HIERARCHY[b.slug] || 99));
 
-    // Sales is a platform-level SaaS role managed exclusively by Super Admin
+    // Super Admin and Sales are platform-level SaaS roles managed exclusively by Super Admin
     let finalRoles = merged;
     if (req.tenantId && req.user?.role !== 'SUPER_ADMIN') {
-      finalRoles = merged.filter(r => r.slug !== 'SALES');
+      finalRoles = merged.filter(r => r.slug !== 'SUPER_ADMIN' && r.slug !== 'SALES');
     }
 
     const meta = buildPaginationMeta(finalRoles.length, 1, finalRoles.length, req.query.sort);
@@ -138,13 +138,26 @@ exports.getAll = async (req, res, next) => {
 // Get single CustomRole by ID
 exports.getById = async (req, res, next) => {
   try {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
     const data = await prisma.customRole.findFirst({
-      where: { id: req.params.id },
+      where: {
+        OR: [
+          { id: req.params.id },
+          { slug: req.params.id },
+          { slug: req.params.id.toUpperCase() }
+        ]
+      },
       include: { permissions: true }
     });
     if (!data) {
       return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Role not found' }, HTTP_STATUS.NOT_FOUND);
     }
+
+    // Security: Non-SuperAdmin cannot query or inspect Super Admin or Sales role details
+    if (!isSuperAdmin && (data.slug === 'SUPER_ADMIN' || data.slug === 'SALES')) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Role not found' }, HTTP_STATUS.NOT_FOUND);
+    }
+
     return sendSuccess(res, formatRolePermissions(data));
   } catch (error) {
     next(error);
@@ -200,17 +213,43 @@ exports.update = async (req, res, next) => {
     }
     const targetRealId = existing.id;
 
-    // Hierarchy check for Company Admin users
+    // Strict Backend Security & Hierarchy Check
     const callerRole = req.user?.role;
     const isSuperAdmin = callerRole === 'SUPER_ADMIN';
 
-    if (req.tenantId && !isSuperAdmin) {
-      const callerRank = ROLE_HIERARCHY[callerRole] || 1;
-      const targetRank = ROLE_HIERARCHY[existing.slug] || 99;
+    // If caller is NOT Super Admin, enforce ironclad protections:
+    if (!isSuperAdmin) {
+      // 1. Absolutely prevent touching Super Admin
+      if (existing.slug === 'SUPER_ADMIN') {
+        return sendError(res, {
+          code: 'FORBIDDEN',
+          message: 'Security Violation: Super Admin platform permissions are strictly protected and cannot be modified by any tenant or Company Admin user.'
+        }, 403);
+      }
+
+      // 2. Absolutely prevent touching Sales (Platform SaaS role)
+      if (existing.slug === 'SALES') {
+        return sendError(res, {
+          code: 'FORBIDDEN',
+          message: 'Security Violation: Sales is a platform-level SaaS role managed exclusively by Platform Super Admin.'
+        }, 403);
+      }
+
+      // 3. Prevent modifying Company Admin master permissions
+      if (existing.slug === 'COMPANY_ADMIN') {
+        return sendError(res, {
+          code: 'FORBIDDEN',
+          message: 'Security Violation: Company Admin master permissions are locked and cannot be modified.'
+        }, 403);
+      }
+
+      // 4. Role Hierarchy rank validation
+      const callerRank = ROLE_HIERARCHY[callerRole] ?? 1;
+      const targetRank = ROLE_HIERARCHY[existing.slug] ?? 99;
       if (targetRank <= callerRank) {
         return sendError(res, {
           code: 'FORBIDDEN',
-          message: `You can only edit roles below your own level. "${existing.name}" has equal or higher authority.`
+          message: `Security Violation: You can only edit roles below your own level. "${existing.name}" has equal or higher authority.`
         }, 403);
       }
     }
