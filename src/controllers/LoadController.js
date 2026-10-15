@@ -24,6 +24,10 @@ exports.getAll = async (req, res, next) => {
       where.companyId = companyId;
     } else if (req.query.companyId) {
       where.companyId = req.query.companyId;
+    } else if (companyId) {
+      where.companyId = companyId;
+    } else {
+      return sendList(res, [], buildPaginationMeta(0, currentPage, pageSize, req.query.sort));
     }
     
     if (req.user && req.user.role === 'DISPATCHER' && req.user.branchId && !req.user.permissions?.includes('dispatch.cross_branch.view')) {

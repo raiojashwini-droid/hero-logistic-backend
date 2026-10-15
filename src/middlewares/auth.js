@@ -117,6 +117,94 @@ exports.requirePermission = (requiredPermission) => {
 };
 
 /**
+ * Checks if user has permission to perform a specific action on a module
+ * Usage: router.post('/jobs', verifyToken, requireActionPermission('Create / Edit Loads', 'Create'), ...)
+ */
+exports.requireActionPermission = (moduleName, actionName) => {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return sendError(res, {
+        code: ERROR_CODES.UNAUTHORIZED_ACCESS,
+        message: 'Authentication required.'
+      }, HTTP_STATUS.UNAUTHORIZED);
+    }
+
+    const role = (req.user.role || '').toUpperCase().trim();
+    if (role === 'SUPER_ADMIN' || role === 'SUPER ADMIN') {
+      return next();
+    }
+
+    // Resolve user's actual permissions map
+    let permissionsMap = req.user.permissionsMap;
+    if (!permissionsMap) {
+      try {
+        const prisma = require('../utils/prismaClient');
+        const roleSlug = req.user.role;
+        let roleRecord = null;
+        if (req.user.companyId) {
+          roleRecord = await prisma.customRole.findFirst({
+            where: {
+              OR: [{ slug: roleSlug }, { name: roleSlug }],
+              companyId: req.user.companyId
+            },
+            include: { permissions: true }
+          });
+        }
+        if (!roleRecord) {
+          roleRecord = await prisma.customRole.findFirst({
+            where: {
+              OR: [{ slug: roleSlug }, { name: roleSlug }],
+              companyId: null,
+              isSystem: true
+            },
+            include: { permissions: true }
+          });
+        }
+
+        permissionsMap = {};
+        if (roleRecord?.permissions) {
+          roleRecord.permissions.forEach(p => {
+            try {
+              permissionsMap[p.module] = JSON.parse(p.actionString);
+            } catch (e) {
+              permissionsMap[p.module] = p.actionString;
+            }
+          });
+        }
+        req.user.permissionsMap = permissionsMap;
+      } catch (e) {
+        permissionsMap = {};
+      }
+    }
+
+    // Policy for Driver creating/editing loads:
+    // If user is DRIVER, creating/editing loads requires explicit permission on 'Create / Edit Loads'
+    if (role.includes('DRIVER') && (moduleName === 'Create / Edit Loads' || moduleName === 'Loads')) {
+      const loadPerms = permissionsMap?.['Create / Edit Loads'] || permissionsMap?.['Loads & Bookings'];
+      const hasPerm = loadPerms && loadPerms[actionName] === true;
+      if (!hasPerm) {
+        return sendError(res, {
+          code: ERROR_CODES.UNAUTHORIZED_ACCESS,
+          message: `Access denied: Driver lacks '${actionName}' permission on '${moduleName}'. Owner Driver privileges required.`
+        }, HTTP_STATUS.FORBIDDEN);
+      }
+      return next();
+    }
+
+    // General module permission check
+    const modPerms = permissionsMap?.[moduleName];
+    if (modPerms && typeof modPerms === 'object' && modPerms[actionName] === false) {
+      return sendError(res, {
+        code: ERROR_CODES.UNAUTHORIZED_ACCESS,
+        message: `Access denied: ${actionName} permission disabled for ${moduleName}.`
+      }, HTTP_STATUS.FORBIDDEN);
+    }
+
+    return next();
+  };
+};
+
+/**
  * Checks if user has any of the allowed roles
  * Usage: router.get('/sales', verifyToken, requireRole('SUPER_ADMIN', 'SALES'), ...)
  */

@@ -33,16 +33,43 @@ const formatRolePermissions = (role) => {
   return { ...role, permissions: permObj };
 };
 
+const SYSTEM_ROLE_SEEDS = [
+  { name: 'Super Admin', slug: 'SUPER_ADMIN', isSystem: true, companyId: null },
+  { name: 'Company Admin', slug: 'COMPANY_ADMIN', isSystem: true, companyId: null },
+  { name: 'Sales', slug: 'SALES', isSystem: true, companyId: null },
+  { name: 'Dispatcher', slug: 'DISPATCHER', isSystem: true, companyId: null },
+  { name: 'Driver', slug: 'DRIVER', isSystem: true, companyId: null },
+  { name: 'Warehouse Manager', slug: 'WAREHOUSE_MANAGER', isSystem: true, companyId: null },
+  { name: 'Yard Attendant', slug: 'YARD_ATTENDANT', isSystem: true, companyId: null },
+  { name: 'Accounts', slug: 'ACCOUNTS', isSystem: true, companyId: null },
+  { name: 'Customer', slug: 'CUSTOMER', isSystem: true, companyId: null }
+];
+
 // Get all CustomRoles — always return the 9 system roles as source of truth.
 // Company Admin sees same roles with parentPermissions and company overrides merged.
 exports.getAll = async (req, res, next) => {
   try {
     // Always load the 9 global system roles first
-    const systemRoles = await prisma.customRole.findMany({
+    let systemRoles = await prisma.customRole.findMany({
       where: { isSystem: true, companyId: null },
       include: { permissions: true },
       orderBy: { createdAt: 'asc' }
     });
+
+    if (!systemRoles || systemRoles.length === 0) {
+      for (const seed of SYSTEM_ROLE_SEEDS) {
+        await prisma.customRole.upsert({
+          where: { slug: seed.slug },
+          update: {},
+          create: seed
+        }).catch(() => {});
+      }
+      systemRoles = await prisma.customRole.findMany({
+        where: { isSystem: true, companyId: null },
+        include: { permissions: true },
+        orderBy: { createdAt: 'asc' }
+      });
+    }
 
     // Check for company-level permission overrides
     let companyOverrides = {};
@@ -152,6 +179,22 @@ exports.update = async (req, res, next) => {
       },
       include: { permissions: true }
     });
+    if (!existing) {
+      const matchSeed = SYSTEM_ROLE_SEEDS.find(s => 
+        s.slug === id.toUpperCase() || 
+        s.slug === id.replace(/^role-/, '').replace(/-/g, '_').toUpperCase() || 
+        s.name.toLowerCase() === id.toLowerCase() ||
+        `role-${s.slug.toLowerCase().replace(/_/g, '-')}` === id.toLowerCase()
+      );
+      if (matchSeed) {
+        existing = await prisma.customRole.upsert({
+          where: { slug: matchSeed.slug },
+          update: {},
+          create: matchSeed,
+          include: { permissions: true }
+        }).catch(() => null);
+      }
+    }
     if (!existing) {
       return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Role not found' }, HTTP_STATUS.NOT_FOUND);
     }

@@ -6,7 +6,7 @@ exports.getDashboardMetrics = async (req, res, next) => {
   try {
     const companyId = resolveCompanyId(req);
 
-    if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
+    if (!companyId) {
       return sendSuccess(res, {
         kpis: {
           totalLoads: 0,
@@ -30,14 +30,9 @@ exports.getDashboardMetrics = async (req, res, next) => {
       });
     }
 
-    const whereScope = getTenantWhere(req);
-
-    const warehouseScope = whereScope.companyId
-      ? { branch: { companyId: whereScope.companyId } }
-      : (req.user?.role === 'SUPER_ADMIN' ? {} : { branch: { companyId: 'IMPOSSIBLE_TENANT_ID_NO_ACCESS' } });
-    const invoiceScope = whereScope.companyId
-      ? { customer: { companyId: whereScope.companyId } }
-      : (req.user?.role === 'SUPER_ADMIN' ? {} : { customer: { companyId: 'IMPOSSIBLE_TENANT_ID_NO_ACCESS' } });
+    const whereScope = { companyId };
+    const warehouseScope = { branch: { companyId } };
+    const invoiceScope = { customer: { companyId } };
 
     // 1. KPI Counts
     const [

@@ -32,6 +32,7 @@ exports.login = async (req, res, next) => {
 
     // Remove password from response
     delete user.password;
+    user.permissions = await resolveUserPermissions(user);
 
     return sendSuccess(res, { user, accessToken }, HTTP_STATUS.OK);
   } catch (error) {
@@ -195,7 +196,7 @@ exports.me = async (req, res, next) => {
 
 exports.impersonate = async (req, res, next) => {
   try {
-    const { targetUserId, reason } = req.body;
+    const { targetUserId, companyId, reason } = req.body;
     const actorId = req.user?.id || req.user?.userId;
     const actorRole = req.user?.role;
     
@@ -210,16 +211,35 @@ exports.impersonate = async (req, res, next) => {
     const prisma = require('../utils/prismaClient');
     const jwt = require('jsonwebtoken');
 
-    // 2. Verify target user exists and belongs to a tenant company
-    const targetUser = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      include: { company: true }
-    });
+    // 2. Verify target user exists or resolve via companyId
+    let targetUser = null;
+    if (targetUserId) {
+      targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        include: { company: true }
+      });
+    } else if (companyId) {
+      targetUser = await prisma.user.findFirst({
+        where: {
+          OR: [{ companyId }, { company: { tenantId: companyId } }],
+          role: 'COMPANY_ADMIN'
+        },
+        include: { company: true }
+      });
+      if (!targetUser) {
+        targetUser = await prisma.user.findFirst({
+          where: {
+            OR: [{ companyId }, { company: { tenantId: companyId } }]
+          },
+          include: { company: true }
+        });
+      }
+    }
 
     if (!targetUser) {
       return sendError(res, {
         code: 'NOT_FOUND',
-        message: 'Target user not found.'
+        message: 'Target workspace admin user not found.'
       }, 404);
     }
 
@@ -237,20 +257,22 @@ exports.impersonate = async (req, res, next) => {
         targetUserId: targetUser.id,
         targetCompanyId: targetUser.companyId,
         reason: reason || 'Platform Support Session',
-        ipAddress: req.ip || req.headers['x-forwarded-for'] || null,
-        userAgent: req.headers['user-agent'] || null
+        ipAddress: req.ip || req.headers?.['x-forwarded-for'] || null,
+        userAgent: req.headers?.['user-agent'] || null
       }
-    });
+    }).catch(err => console.warn('ImpersonationSession audit log warning:', err.message));
 
     // 4. Generate the impersonated accessToken
     const SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev-only';
     const EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
+    const isProd = process.env.NODE_ENV === 'production';
 
     const impersonatedToken = jwt.sign(
       {
         userId: targetUser.id,
         role: targetUser.role,
         tenantId: targetUser.companyId,
+        companyId: targetUser.companyId,
         impersonatedTenantId: targetUser.companyId,
         actorId,
         isImpersonating: true

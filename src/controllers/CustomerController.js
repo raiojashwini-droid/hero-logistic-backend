@@ -109,7 +109,9 @@ exports.getPortalData = async (req, res, next) => {
       contactName: c.contactName || 'N/A',
       contactEmail: c.email || 'N/A',
       contactPhone: c.phone || 'N/A',
-      transportModules: Array.isArray(c.transportModules) ? c.transportModules : (c.transportModules ? JSON.parse(c.transportModules) : ['truck']),
+      transportModules: Array.isArray(c.transportModules)
+        ? c.transportModules
+        : (c.transportModules ? (() => { try { return JSON.parse(c.transportModules); } catch (e) { return [c.transportModules]; } })() : ['General Freight']),
       billingTerms: c.billingTerms || '14 Days EOM',
       billingType: 'EOM',
       manager: c.accountManager ? `${c.accountManager.name || ''}`.trim() : 'N/A',
@@ -173,7 +175,14 @@ exports.getById = async (req, res, next) => {
       }, HTTP_STATUS.NOT_FOUND);
     }
     
-    return sendSuccess(res, data);
+    const formattedData = {
+      ...data,
+      transportModules: Array.isArray(data.transportModules)
+        ? data.transportModules
+        : (data.transportModules ? (() => { try { return JSON.parse(data.transportModules); } catch (e) { return [data.transportModules]; } })() : ['General Freight'])
+    };
+    
+    return sendSuccess(res, formattedData);
   } catch (error) {
     next(error);
   }
@@ -204,12 +213,18 @@ exports.create = async (req, res, next) => {
     if (raw.email) payload.email = raw.email;
     if (raw.phone) payload.phone = raw.phone;
     if (raw.billingTerms) payload.billingTerms = raw.billingTerms;
-    if (raw.transportModules) payload.transportModules = typeof raw.transportModules === 'string' ? raw.transportModules : JSON.stringify(raw.transportModules);
+    if (raw.transportModules !== undefined) {
+      payload.transportModules = typeof raw.transportModules === 'string'
+        ? raw.transportModules
+        : JSON.stringify(raw.transportModules);
+    } else {
+      payload.transportModules = JSON.stringify(['General Freight']);
+    }
     if (raw.branchId || req.user?.branchId) payload.branchId = raw.branchId || req.user?.branchId;
 
     if (raw.type) {
       const tUpper = String(raw.type).toUpperCase();
-      payload.type = (tUpper === 'INDIVIDUAL') ? 'INDIVIDUAL' : 'BUSINESS';
+      payload.type = (tUpper === 'INDIVIDUAL') ? 'INDIVIDUAL' : (tUpper === 'CORPORATE') ? 'CORPORATE' : 'BUSINESS';
     }
 
     if (raw.status) {
@@ -239,6 +254,38 @@ exports.update = async (req, res, next) => {
     delete updateData.companyId; // Never trust companyId from payload
     delete updateData.accountManagerId;
     delete updateData.manager;
+    delete updateData.id;
+    delete updateData.acn;
+    delete updateData.category;
+    delete updateData.creditLimit;
+    delete updateData.branch;
+    delete updateData.loads;
+    delete updateData.billedLoads;
+    delete updateData.loadItems;
+    delete updateData.invoices;
+    delete updateData.pricingProfiles;
+    delete updateData.billingRules;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
+
+    if (updateData.transportModules !== undefined) {
+      updateData.transportModules = typeof updateData.transportModules === 'string'
+        ? updateData.transportModules
+        : JSON.stringify(updateData.transportModules);
+    }
+
+    if (updateData.type) {
+      const tUpper = String(updateData.type).toUpperCase();
+      updateData.type = (tUpper === 'INDIVIDUAL') ? 'INDIVIDUAL' : (tUpper === 'CORPORATE') ? 'CORPORATE' : 'BUSINESS';
+    }
+
+    if (updateData.status) {
+      const sUpper = String(updateData.status).toUpperCase();
+      if (['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(sUpper)) {
+        updateData.status = sUpper;
+      }
+    }
+
     const companyId = getEffectiveCompanyId(req);
     
     const where = { id };

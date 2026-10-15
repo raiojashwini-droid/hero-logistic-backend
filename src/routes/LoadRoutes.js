@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const LoadController = require('../controllers/LoadController');
-const { verifyToken } = require('../middlewares/auth');
+const { verifyToken, requireActionPermission } = require('../middlewares/auth');
 const { resolveTenant } = require('../middlewares/tenantResolver');
 const { requireIdempotency } = require('../middlewares/idempotency');
 
@@ -9,15 +9,15 @@ router.use(verifyToken, resolveTenant);
 
 router.route('/')
   .get(LoadController.getAll)
-  .post(LoadController.create);
+  .post(requireActionPermission('Loads', 'Create'), LoadController.create);
 
 router.get('/planning-board', LoadController.getPlanningBoard);
 router.get('/active', LoadController.getActiveLoads);
 
 router.route('/:id')
   .get(LoadController.getById)
-  .put(LoadController.update)
-  .delete(LoadController.delete);
+  .put(requireActionPermission('Loads', 'Edit'), LoadController.update)
+  .delete(requireActionPermission('Loads', 'Delete'), LoadController.delete);
 
 // Custom routes
 router.post('/:id/activate', requireIdempotency, LoadController.activate);

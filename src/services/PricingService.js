@@ -36,14 +36,38 @@ class PricingService {
       const pAddr = stops.find(s => (s.type || '').toLowerCase().includes('pick'))?.address?.toLowerCase() || '';
       const dAddr = stops.find(s => (s.type || '').toLowerCase().includes('drop'))?.address?.toLowerCase() || '';
 
-      // Match profile
+      // Match profile with prioritized hierarchy
       let matchedProfile = null;
       if (pricingProfiles.length > 0) {
-        matchedProfile = pricingProfiles.find(r => {
-          const fromMatch = !r.origin || (pAddr && pAddr.includes(r.origin.toLowerCase()));
-          const toMatch = !r.destination || (dAddr && dAddr.includes(r.destination.toLowerCase()));
-          return fromMatch && toMatch;
-        }) || pricingProfiles[0];
+        if (pAddr && dAddr) {
+          // Priority 1: Exact origin + destination match (both specified and match)
+          matchedProfile = pricingProfiles.find(r => {
+            if (!r.origin || !r.destination) return false;
+            const o = r.origin.toLowerCase().trim();
+            const d = r.destination.toLowerCase().trim();
+            return (pAddr.includes(o) || o.includes(pAddr)) && (dAddr.includes(d) || d.includes(dAddr));
+          });
+
+          // Priority 2: Origin match (open destination) or Destination match (open origin)
+          if (!matchedProfile) {
+            matchedProfile = pricingProfiles.find(r => {
+              if (r.origin && (!r.destination || r.destination.trim() === '')) return pAddr.includes(r.origin.toLowerCase().trim());
+              if ((!r.origin || r.origin.trim() === '') && r.destination) return dAddr.includes(r.destination.toLowerCase().trim());
+              return false;
+            });
+          }
+
+          // Priority 3: General customer flat profile (no route constraints)
+          if (!matchedProfile) {
+            matchedProfile = pricingProfiles.find(r => (!r.origin || r.origin.trim() === '') && (!r.destination || r.destination.trim() === ''));
+          }
+        } else if (pAddr) {
+          matchedProfile = pricingProfiles.find(r => r.origin && pAddr.includes(r.origin.toLowerCase().trim()));
+        } else if (dAddr) {
+          matchedProfile = pricingProfiles.find(r => r.destination && dAddr.includes(r.destination.toLowerCase().trim()));
+        } else {
+          matchedProfile = pricingProfiles.find(r => (!r.origin || r.origin.trim() === '') && (!r.destination || r.destination.trim() === '')) || pricingProfiles[0];
+        }
       }
 
       // Default calculation values

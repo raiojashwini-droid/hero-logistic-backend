@@ -204,13 +204,8 @@ function calculatePerLoadDriverPay({ load = null, driverRate = 0, ruleRate = 0, 
         store = companyCtrl?.driverLoadScheduleStore || {};
       } catch (e) {}
 
-      const companyId = driver?.companyId || load?.companyId || 'default';
-      const companySchedules = store[companyId] || store['default'] || [
-        { origin: 'Sydney', destination: 'Melbourne', rate: 500.00 },
-        { origin: 'Melbourne', destination: 'Adelaide', rate: 1000.00 },
-        { origin: 'Sydney', destination: 'Brisbane', rate: 650.00 },
-        { origin: 'Brisbane', destination: 'Cairns', rate: 1200.00 }
-      ];
+      const companyId = driver?.companyId || load?.companyId;
+      const companySchedules = companyId && Array.isArray(store[companyId]) ? store[companyId] : [];
 
       if (Array.isArray(companySchedules) && companySchedules.length > 0) {
         let pAddr = String(load.origin || load.pickupLocation || load.from || '').trim().toLowerCase();

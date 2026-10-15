@@ -1510,11 +1510,11 @@ exports.createVehicle = async (req, res, next) => {
 exports.getBranches = async (req, res, next) => {
   try {
     const companyId = resolveCompanyId(req);
-    if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
+    if (!companyId) {
       return sendList(res, [], buildPaginationMeta(0, 1, 10));
     }
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
-    const tenantWhere = getTenantWhere(req);
+    const tenantWhere = getTenantWhere(req, true);
     Object.assign(where, tenantWhere);
 
     const [data, total] = await Promise.all([
@@ -1612,7 +1612,7 @@ exports.deleteBranch = async (req, res, next) => {
 exports.getAssets = async (req, res, next) => {
   try {
     const companyId = resolveCompanyId(req);
-    if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
+    if (!companyId) {
       return sendSuccess(res, {
         assets: [],
         stats: {
@@ -1630,7 +1630,7 @@ exports.getAssets = async (req, res, next) => {
         branches: []
       });
     }
-    const tenantWhere = getTenantWhere(req);
+    const tenantWhere = getTenantWhere(req, true);
     const { search, category, type, branch, status } = req.query;
 
     const categoryVal = category || 'All';
@@ -2194,7 +2194,11 @@ exports.getWarehouses = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
-    if (companyId) where.branch = { companyId };
+    if (companyId) {
+      where.branch = { companyId };
+    } else {
+      return sendList(res, [], buildPaginationMeta(0, currentPage || 1, pageSize || 10, req.query?.sort));
+    }
 
     const [data, total] = await Promise.all([
       prisma.warehouse.findMany({ where, skip, take, orderBy, include: { branch: true, manager: true, loadLanes: true, stagingAreas: true } }),
@@ -2227,11 +2231,11 @@ exports.createWarehouse = async (req, res, next) => {
 // 9. PRICING & RATE MATRIX MENU  
 // ----------------------------------------------------------------------
 
-// â”€â”€ Stats summary (KPI cards)
+// ── Stats summary (KPI cards)
 exports.getPricingStats = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const whereScope = companyId ? { companyId } : {};
+    const whereScope = companyId ? { companyId } : { companyId: 'IMPOSSIBLE_NO_TENANT_ACCESS' };
 
     const [laneCount, vehicleRateCount, activeFuelLog] = await Promise.all([
       prisma.lanePricingRule.count({ where: { ...whereScope, status: 'Active' } }),
@@ -2264,11 +2268,11 @@ exports.getPricing = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
-// â”€â”€ Lane Pricing
+// ── Lane Pricing
 exports.getLanePricing = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const whereScope = companyId ? { companyId } : {};
+    const whereScope = companyId ? { companyId } : { companyId: 'IMPOSSIBLE_NO_TENANT_ACCESS' };
     const search = req.query.search || '';
     const where = { ...whereScope };
     if (search) {
@@ -2355,11 +2359,11 @@ exports.duplicateLanePricing = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
-// â”€â”€ Vehicle Type Rates
+// ── Vehicle Type Rates
 exports.getVehicleRates = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const whereScope = companyId ? { companyId } : {};
+    const whereScope = companyId ? { companyId } : { companyId: 'IMPOSSIBLE_NO_TENANT_ACCESS' };
     const data = await prisma.vehicleTypeRate.findMany({ where: whereScope, orderBy: { createdAt: 'asc' } });
     return sendSuccess(res, data);
   } catch (error) { next(error); }
@@ -2401,11 +2405,11 @@ exports.updateVehicleRate = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
-// â”€â”€ Fuel Surcharge
+// ── Fuel Surcharge
 exports.getFuelSurcharge = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const whereScope = companyId ? { companyId } : {};
+    const whereScope = companyId ? { companyId } : { companyId: 'IMPOSSIBLE_NO_TENANT_ACCESS' };
     const logs = await prisma.fuelSurchargeLog.findMany({ where: whereScope, orderBy: { createdAt: 'desc' }, take: 10 });
     const active = logs.find(l => l.isActive) || logs[0] || null;
     return sendSuccess(res, { currentRate: active ? active.rate : 14.5, activeLog: active, history: logs });
@@ -3057,48 +3061,7 @@ exports.getDriverLoadSchedule = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req) || 'default';
     if (!driverLoadScheduleStore[companyId]) {
-      driverLoadScheduleStore[companyId] = [
-        {
-          id: 'SCHED-101',
-          origin: 'Sydney',
-          destination: 'Melbourne',
-          rate: 500.00,
-          licenseClass: 'MC - Multi Combination',
-          status: 'Active',
-          notes: 'Standard interstate linehaul route rate',
-          updatedAt: new Date().toISOString()
-        },
-        {
-          id: 'SCHED-102',
-          origin: 'Melbourne',
-          destination: 'Adelaide',
-          rate: 1000.00,
-          licenseClass: 'HC - Heavy Combination',
-          status: 'Active',
-          notes: 'Express regional corridor rate',
-          updatedAt: new Date().toISOString()
-        },
-        {
-          id: 'SCHED-103',
-          origin: 'Sydney',
-          destination: 'Brisbane',
-          rate: 650.00,
-          licenseClass: 'All Classes',
-          status: 'Active',
-          notes: 'Coastal highway route schedule',
-          updatedAt: new Date().toISOString()
-        },
-        {
-          id: 'SCHED-104',
-          origin: 'Brisbane',
-          destination: 'Cairns',
-          rate: 1200.00,
-          licenseClass: 'MC - Multi Combination',
-          status: 'Active',
-          notes: 'North Queensland long distance linehaul',
-          updatedAt: new Date().toISOString()
-        }
-      ];
+      driverLoadScheduleStore[companyId] = [];
     }
 
     const { search, status, licenseClass } = req.query;
@@ -4992,11 +4955,28 @@ exports.deleteLoadStop = async (req, res, next) => {
 exports.getWarehouses = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const branchWhere = companyId ? { companyId } : {};
+    if (!companyId) {
+      return sendSuccess(res, {
+        warehouses: [],
+        stats: {
+          totalWarehouses: 0,
+          activeWarehouses: 0,
+          totalInventoryValue: '$0.00',
+          totalStockItems: 0,
+          pendingTasks: 0,
+          incomingShipments: 0,
+          outgoingShipments: 0,
+          totalWh: 0,
+          activeWh: 0,
+          totalCapacityPallets: 0,
+          avgUtilisationPct: 0
+        }
+      });
+    }
 
     const warehouses = await prisma.warehouse.findMany({
       where: {
-        branch: branchWhere
+        branch: { companyId }
       },
       include: {
         branch: true,

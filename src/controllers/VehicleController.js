@@ -20,6 +20,10 @@ exports.getAll = async (req, res, next) => {
       where.companyId = companyId;
     } else if (req.query.companyId) {
       where.companyId = req.query.companyId;
+    } else if (companyId) {
+      where.companyId = companyId;
+    } else {
+      return sendList(res, [], buildPaginationMeta(0, currentPage, pageSize, req.query.sort));
     }
 
     await syncMissingVehicleColumns().catch(() => {});
@@ -131,8 +135,11 @@ const ALLOWED_VEHICLE_FIELDS = new Set([
 const sanitizePayload = (rawPayload) => {
   const clean = {};
 
-  if (rawPayload.rego) clean.rego = String(rawPayload.rego).trim();
-  if (rawPayload.plate) clean.plate = String(rawPayload.plate).trim();
+  const incomingRego = rawPayload.rego || rawPayload.reg || rawPayload.registrationNumber || rawPayload.plate;
+  if (incomingRego) {
+    clean.rego = String(incomingRego).trim().toUpperCase();
+    clean.plate = String(incomingRego).trim().toUpperCase();
+  }
   if (rawPayload.vin) clean.vin = String(rawPayload.vin).trim();
 
   if (rawPayload.make !== undefined) {
@@ -451,23 +458,25 @@ exports.update = async (req, res, next) => {
     const { id } = req.params;
     const updateData = sanitizePayload(req.body);
 
-    if (req.tenantId) {
-      const findWhere = { id, companyId: req.tenantId };
-      if (req.user && req.user.role === 'DISPATCHER' && req.user.branchId && !req.user.permissions?.includes('dispatch.cross_branch.view')) {
-        findWhere.branchId = req.user.branchId;
+    const companyId = resolveCompanyId(req);
+    const findWhere = { id };
+    if (req.user?.role !== 'SUPER_ADMIN') {
+      if (!companyId) {
+        return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Vehicle not found' }, HTTP_STATUS.NOT_FOUND);
       }
-      const existing = await prisma.vehicle.findFirst({
-        where: findWhere
-      });
-      if (!existing) {
-        const vehicleExists = await prisma.vehicle.findUnique({ where: { id } });
-        if (!vehicleExists) {
-          return sendError(res, {
-            code: ERROR_CODES.NOT_FOUND,
-            message: 'Vehicle not found'
-          }, HTTP_STATUS.NOT_FOUND);
-        }
-      }
+      findWhere.companyId = companyId;
+    }
+    if (req.user && req.user.role === 'DISPATCHER' && req.user.branchId && !req.user.permissions?.includes('dispatch.cross_branch.view')) {
+      findWhere.branchId = req.user.branchId;
+    }
+    const existing = await prisma.vehicle.findFirst({
+      where: findWhere
+    });
+    if (!existing) {
+      return sendError(res, {
+        code: ERROR_CODES.NOT_FOUND,
+        message: 'Vehicle not found'
+      }, HTTP_STATUS.NOT_FOUND);
     }
     
     const where = { id };

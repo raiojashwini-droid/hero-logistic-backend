@@ -20,6 +20,10 @@ exports.resolveTenant = async (req, res, next) => {
     else if (req.user && req.user.role === 'SUPER_ADMIN' && req.query.companyId) {
       tenantId = req.query.companyId;
     }
+    // 4. Header fallback for tenant scoping / API testing
+    else if (req.headers && (req.headers['x-company-id'] || req.headers['x-tenant-id'])) {
+      tenantId = req.headers['x-company-id'] || req.headers['x-tenant-id'];
+    }
 
     req.tenantId = tenantId || null;
     next();
@@ -29,13 +33,22 @@ exports.resolveTenant = async (req, res, next) => {
 };
 
 exports.resolveCompanyId = (req) => {
-  return req.tenantId || req.user?.companyId || req.user?.tenantId || (req.user?.role === 'SUPER_ADMIN' && req.query?.companyId ? req.query.companyId : null);
+  return req.tenantId ||
+    req.user?.companyId ||
+    req.user?.tenantId ||
+    req.user?.impersonatedTenantId ||
+    (req.user?.role === 'SUPER_ADMIN' && req.query?.companyId ? req.query.companyId : null) ||
+    (req.headers ? (req.headers['x-company-id'] || req.headers['x-tenant-id']) : null);
 };
 
-exports.getTenantWhere = (req) => {
+exports.getTenantWhere = (req, strictTenant = false) => {
   const companyId = exports.resolveCompanyId(req);
   if (companyId) {
     return { companyId };
+  }
+  // Enforce zero-data isolation on all company-admin portal routes or when strictTenant is true
+  if (strictTenant || (req.baseUrl && req.baseUrl.includes('company-admin'))) {
+    return { companyId: 'IMPOSSIBLE_TENANT_ID_NO_ACCESS' };
   }
   if (req.user && req.user.role === 'SUPER_ADMIN') {
     return {};
@@ -47,11 +60,16 @@ exports.getTenantWhere = (req) => {
  * Middleware to enforce tenant isolation strictly
  */
 exports.requireTenant = (req, res, next) => {
-  if (!req.tenantId && req.user?.role !== 'SUPER_ADMIN') {
+  const companyId = exports.resolveCompanyId(req);
+  if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
     return sendError(res, {
       code: ERROR_CODES.UNAUTHORIZED_ACCESS,
       message: 'Tenant context is missing. You must operate within a tenant scope.'
     }, HTTP_STATUS.FORBIDDEN);
   }
+  if (companyId) {
+    req.tenantId = companyId;
+  }
   next();
 };
+

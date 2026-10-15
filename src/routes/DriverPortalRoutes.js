@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const DriverPortalController = require('../controllers/DriverPortalController');
-const { verifyToken } = require('../middlewares/auth');
+const { verifyToken, requireActionPermission } = require('../middlewares/auth');
 const { resolveTenant } = require('../middlewares/tenantResolver');
 
 router.use(verifyToken, resolveTenant);
@@ -39,7 +39,7 @@ router.post('/delivery-pod/confirm-delivery', DriverPortalController.confirmDeli
 
 router.get('/active-run', DriverPortalController.getActiveRun);
 router.get('/jobs', DriverPortalController.getJobs);
-router.post('/jobs', DriverPortalController.createJobRequest);
+router.post('/jobs', requireActionPermission('Create / Edit Loads', 'Create'), DriverPortalController.createJobRequest);
 router.delete('/jobs/:id', DriverPortalController.deleteJob);
 
 // Expenses

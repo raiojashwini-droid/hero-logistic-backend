@@ -507,9 +507,9 @@ exports.getDashboard = async (req, res, next) => {
           // 3. Match against Company-wide Load Pay Schedules (managed in Company → Payroll)
           if (loadAmt <= 0) {
             try {
-              const companyId = driver?.companyId || req.tenantId || 'default';
+              const companyId = driver?.companyId || req.tenantId;
               const store = companyCtrl.driverLoadScheduleStore || {};
-              const companySchedules = store[companyId] || store['default'] || [];
+              const companySchedules = companyId && Array.isArray(store[companyId]) ? store[companyId] : [];
               if (Array.isArray(companySchedules) && companySchedules.length > 0) {
                 const pickupStop = ld.stops?.find(s => s.type === 'PICKUP') || ld.stops?.[0];
                 const dropStop = ld.stops?.find(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || ld.stops?.[ld.stops.length - 1];
@@ -1946,19 +1946,25 @@ exports.getActiveRun = async (req, res, next) => {
 exports.getExpenses = async (req, res, next) => {
   try {
     const driver = await resolveDriver(req);
-    const driverId = driver?.id;
+    if (!driver) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
+    }
+    const driverId = driver.id;
+    const companyId = driver.companyId || req.tenantId;
 
     let expenses = [];
-    if (driverId && prisma.loadExpense) {
+    if (prisma.loadExpense) {
       expenses = await prisma.loadExpense.findMany({
         where: {
-          load: {
-            driverId
-          }
+          ...(companyId ? { companyId } : {}),
+          OR: [
+            { driverId: driverId },
+            { load: { driverId: driverId } }
+          ]
         },
         include: {
           load: {
-            select: { loadRef: true, id: true }
+            select: { loadRef: true, id: true, loadNumber: true }
           }
         },
         orderBy: { date: 'desc' }
@@ -1968,48 +1974,7 @@ exports.getExpenses = async (req, res, next) => {
       });
     }
 
-    if (!expenses || expenses.length === 0) {
-      expenses = [
-        {
-          id: 'exp-1',
-          type: 'Fuel',
-          vendorName: 'BP Express Sydney',
-          amount: 245.50,
-          litres: 120,
-          pricePerLitre: 2.05,
-          odometer: 145200,
-          description: 'Diesel refill for LD-3987',
-          date: new Date().toISOString(),
-          status: 'APPROVED'
-        },
-        {
-          id: 'exp-2',
-          type: 'Maintenance',
-          vendorName: 'Shell Fleet Workshop',
-          amount: 180.00,
-          litres: null,
-          pricePerLitre: null,
-          odometer: 145150,
-          description: 'Tyre pressure & oil check',
-          date: new Date(Date.now() - 86400000).toISOString(),
-          status: 'APPROVED'
-        },
-        {
-          id: 'exp-3',
-          type: 'Tolls',
-          vendorName: 'Citylink Express Toll',
-          amount: 45.00,
-          litres: null,
-          pricePerLitre: null,
-          odometer: 145000,
-          description: 'M7 Motorway Toll Pass',
-          date: new Date(Date.now() - 172800000).toISOString(),
-          status: 'APPROVED'
-        }
-      ];
-    }
-
-    return sendSuccess(res, { expenses });
+    return sendSuccess(res, { expenses: expenses || [] });
   } catch (error) {
     next(error);
   }
@@ -2025,17 +1990,46 @@ exports.addExpense = async (req, res, next) => {
       return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
     }
 
-    const { type, vendorName, amount, litres, pricePerLitre, odometer, description, loadId } = req.body;
+    const { type, vendorName, amount, litres, pricePerLitre, odometer, description, loadId, receiptUrl, date } = req.body;
+
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return sendError(res, { code: ERROR_CODES.BAD_REQUEST, message: 'A valid expense amount greater than 0 is required.' }, 400);
+    }
+
+    if (!vendorName || String(vendorName).trim() === '') {
+      return sendError(res, { code: ERROR_CODES.BAD_REQUEST, message: 'Vendor name is required.' }, 400);
+    }
+
     let activeLoadId = null;
-    if (loadId && String(loadId).length > 20) {
+
+    // Verify load belongs to this driver and company
+    if (loadId && prisma.load) {
       const load = await prisma.load.findFirst({
-        where: { id: String(loadId) }
+        where: {
+          OR: [
+            { id: String(loadId) },
+            { loadRef: String(loadId) },
+            { loadNumber: String(loadId) }
+          ],
+          driverId: driver.id,
+          ...(driver.companyId && { companyId: driver.companyId })
+        }
       }).catch(() => null);
       if (load) activeLoadId = load.id;
     }
 
-    if (!activeLoadId) {
-      return sendError(res, { code: 'VALIDATION_ERROR', message: 'Load ID is strictly required to add expenses for Multiple Independent Loads.' }, 400);
+    // If loadId not explicitly matched, attach driver's current active load if one exists
+    if (!activeLoadId && driver.id && prisma.load) {
+      const activeLoad = await prisma.load.findFirst({
+        where: {
+          driverId: driver.id,
+          status: { in: ['ASSIGNED', 'PLANNED', 'DISPATCHED', 'ACTIVE', 'IN_TRANSIT'] },
+          ...(driver.companyId && { companyId: driver.companyId })
+        },
+        orderBy: { createdAt: 'desc' }
+      }).catch(() => null);
+      if (activeLoad) activeLoadId = activeLoad.id;
     }
 
     const compId = driver.companyId || req.tenantId;
@@ -2045,19 +2039,25 @@ exports.addExpense = async (req, res, next) => {
         loadId: activeLoadId,
         companyId: compId,
         driverId: driver.id,
-        date: new Date(),
+        date: date ? new Date(date) : new Date(),
         type: type || 'Fuel',
-        description: description || null,
-        amount: parseFloat(amount) || 0,
-        vendorName: vendorName || null,
-        litres: parseFloat(litres) || null,
-        pricePerLitre: parseFloat(pricePerLitre) || null,
-        odometer: parseInt(odometer) || null,
+        description: description ? String(description).trim() : null,
+        amount: parsedAmount,
+        vendorName: String(vendorName).trim(),
+        litres: (litres !== undefined && litres !== null && litres !== '') ? parseFloat(litres) : null,
+        pricePerLitre: (pricePerLitre !== undefined && pricePerLitre !== null && pricePerLitre !== '') ? parseFloat(pricePerLitre) : null,
+        odometer: (odometer !== undefined && odometer !== null && odometer !== '') ? parseInt(odometer) : null,
+        receiptUrl: receiptUrl || null,
         status: 'PENDING'
+      },
+      include: {
+        load: {
+          select: { loadRef: true, id: true, loadNumber: true }
+        }
       }
     });
 
-    return sendSuccess(res, { expense });
+    return sendSuccess(res, { expense }, 201);
   } catch (error) {
     next(error);
   }

@@ -18,6 +18,10 @@ exports.getAll = async (req, res, next) => {
       where.companyId = companyId;
     } else if (req.query.companyId) {
       where.companyId = req.query.companyId;
+    } else if (companyId) {
+      where.companyId = companyId;
+    } else {
+      return sendList(res, [], buildPaginationMeta(0, currentPage, pageSize, req.query.sort));
     }
 
     if (req.user && req.user.role === 'DISPATCHER' && req.user.branchId && !req.user.permissions?.includes('dispatch.cross_branch.view')) {
@@ -535,25 +539,27 @@ exports.update = async (req, res, next) => {
   try {
     const { id } = req.params;
     const rawLoadPaySchedule = req.body.loadPaySchedule; // capture before sanitize
-    const updateData = await sanitizeDriverPayload(req.body, req.tenantId);
+    const companyId = resolveCompanyId(req);
+    const updateData = await sanitizeDriverPayload(req.body, companyId);
 
-    if (req.tenantId) {
-      const findWhere = { id, companyId: req.tenantId };
-      if (req.user && req.user.role === 'DISPATCHER' && req.user.branchId && !req.user.permissions?.includes('dispatch.cross_branch.view')) {
-        findWhere.branchId = req.user.branchId;
+    const findWhere = { id };
+    if (req.user?.role !== 'SUPER_ADMIN') {
+      if (!companyId) {
+        return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver not found' }, HTTP_STATUS.NOT_FOUND);
       }
-      const existing = await prisma.driver.findFirst({
-        where: findWhere
-      });
-      if (!existing) {
-        const driverExists = await prisma.driver.findUnique({ where: { id } });
-        if (!driverExists) {
-          return sendError(res, {
-            code: ERROR_CODES.NOT_FOUND,
-            message: 'Driver not found'
-          }, HTTP_STATUS.NOT_FOUND);
-        }
-      }
+      findWhere.companyId = companyId;
+    }
+    if (req.user && req.user.role === 'DISPATCHER' && req.user.branchId && !req.user.permissions?.includes('dispatch.cross_branch.view')) {
+      findWhere.branchId = req.user.branchId;
+    }
+    const existing = await prisma.driver.findFirst({
+      where: findWhere
+    });
+    if (!existing) {
+      return sendError(res, {
+        code: ERROR_CODES.NOT_FOUND,
+        message: 'Driver not found'
+      }, HTTP_STATUS.NOT_FOUND);
     }
 
     // Check existing driver for user linking
