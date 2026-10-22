@@ -1493,6 +1493,7 @@ exports.createVehicle = async (req, res, next) => {
       fuelType: rawPayload.fuelType || 'Diesel',
       odometerKm: rawPayload.odometerKm && !isNaN(rawPayload.odometerKm) ? parseInt(rawPayload.odometerKm) : 0,
       maintenanceDueKm: rawPayload.maintenanceDueKm && !isNaN(rawPayload.maintenanceDueKm) ? parseInt(rawPayload.maintenanceDueKm) : null,
+      primaryMechanic: rawPayload.primaryMechanic || null,
       photoUrl: photoUrlVal
     };
 
