@@ -15,6 +15,7 @@ async function syncMissingVehicleColumns() {
       `ALTER TABLE user ADD COLUMN address TEXT`,
       `ALTER TABLE user ADD COLUMN emergencyContact VARCHAR(255)`,
       `ALTER TABLE vehicle ADD COLUMN photoUrl TEXT`,
+      `ALTER TABLE vehicle ADD COLUMN year INT`,
       `ALTER TABLE vehicle ADD COLUMN branchId VARCHAR(255)`,
       `ALTER TABLE vehicle ADD COLUMN regType VARCHAR(255)`,
       `ALTER TABLE vehicle ADD COLUMN regState VARCHAR(255)`,

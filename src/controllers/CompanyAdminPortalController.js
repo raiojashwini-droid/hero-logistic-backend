@@ -1486,6 +1486,7 @@ exports.createVehicle = async (req, res, next) => {
       make: rawPayload.make || null,
       model: rawPayload.model || null,
       plate: rawPayload.plate || regoVal,
+      year: rawPayload.year && !isNaN(rawPayload.year) ? parseInt(rawPayload.year) : null,
       category: validCategory,
       status: validStatus,
       color: rawPayload.color || null,

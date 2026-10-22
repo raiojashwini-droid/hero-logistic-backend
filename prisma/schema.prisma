@@ -1136,6 +1136,7 @@ model Vehicle {
   make             String?
   model            String?
   plate            String?
+  year             Int?
   rego             String?         @unique // e.g., ABC123
   vin              String?         @unique
   odometerKm       Int             @default(0)

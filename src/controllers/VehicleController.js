@@ -124,7 +124,7 @@ const saveBase64Photo = (photoData) => {
 };
 
 const ALLOWED_VEHICLE_FIELDS = new Set([
-  'rego', 'plate', 'make', 'model', 'category', 'color', 'vin', 
+  'rego', 'plate', 'make', 'model', 'year', 'category', 'color', 'vin', 
   'engineNumber', 'odometerKm', 'maintenanceDueKm', 'fuelType', 'regType', 
   'regState', 'regIssueDate', 'regExpiryDate', 'maxDistPerTripKm', 
   'primaryMechanic', 'preferredRoutes', 'preferredRegions', 'dgCertified', 
@@ -141,6 +141,10 @@ const sanitizePayload = (rawPayload) => {
     clean.plate = String(incomingRego).trim().toUpperCase();
   }
   if (rawPayload.vin) clean.vin = String(rawPayload.vin).trim();
+  if (rawPayload.year !== undefined && rawPayload.year !== null) {
+    const parsedYear = parseInt(String(rawPayload.year).replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(parsedYear)) clean.year = parsedYear;
+  }
 
   if (rawPayload.make !== undefined) {
     const makeStr = String(rawPayload.make || '').trim();
@@ -326,16 +330,26 @@ exports.create = async (req, res, next) => {
       vinVal = `VIN-${Math.floor(10000 + Math.random() * 90000)}`;
     }
 
-    // Check pre-existing registration or VIN safely
+    // Check pre-existing registration or VIN safely without altering user input
     try {
-      const existingReg = await prisma.vehicle.findFirst({ where: { rego: regoVal } });
-      if (existingReg) {
-        regoVal = `${regoVal}-${Math.floor(100 + Math.random() * 900)}`;
+      if (regoVal) {
+        const existingReg = await prisma.vehicle.findFirst({ where: { rego: regoVal } });
+        if (existingReg && existingReg.companyId === effectiveCompanyId) {
+          return sendError(res, {
+            code: ERROR_CODES.VALIDATION_ERROR,
+            message: `A vehicle with registration "${regoVal}" already exists in your fleet.`
+          }, HTTP_STATUS.BAD_REQUEST);
+        }
       }
 
-      const existingVin = await prisma.vehicle.findFirst({ where: { vin: vinVal } });
-      if (existingVin) {
-        vinVal = `${vinVal}-${Math.floor(100 + Math.random() * 900)}`;
+      if (vinVal) {
+        const existingVin = await prisma.vehicle.findFirst({ where: { vin: vinVal } });
+        if (existingVin && existingVin.companyId === effectiveCompanyId) {
+          return sendError(res, {
+            code: ERROR_CODES.VALIDATION_ERROR,
+            message: `A vehicle with VIN "${vinVal}" already exists in your fleet.`
+          }, HTTP_STATUS.BAD_REQUEST);
+        }
       }
     } catch (checkErr) {
       console.warn('Vehicle duplicate check warning:', checkErr.message);
@@ -368,6 +382,7 @@ exports.create = async (req, res, next) => {
       make: rawPayload.make || null,
       model: rawPayload.model || null,
       plate: rawPayload.plate || regoVal,
+      year: rawPayload.year ? parseInt(String(rawPayload.year).replace(/[^0-9]/g, ''), 10) || null : null,
       category: validCategory,
       status: validStatus,
       fuelType: rawPayload.fuelType || null,
@@ -417,6 +432,7 @@ exports.create = async (req, res, next) => {
           vin: vinVal,
           make: rawPayload.make || null,
           model: rawPayload.model || null,
+          year: rawPayload.year ? parseInt(String(rawPayload.year).replace(/[^0-9]/g, ''), 10) || null : null,
           category: validCategory,
           status: validStatus,
           odometerKm: odo
