@@ -893,44 +893,62 @@ exports.getActiveLoads = async (req, res, next) => {
         routeToStr = parts[1] || 'Destination Not Specified';
       }
 
-      let computedDots = 1;
+      let computedDots = 0;
       if (dbLoad.status === 'ASSIGNED' || dbLoad.status === 'En Route') computedDots = 2;
       else if (dbLoad.status === 'At Pickup') computedDots = 3;
       else if (dbLoad.status === 'Loaded') computedDots = 4;
       else if (dbLoad.status === 'IN_TRANSIT' || dbLoad.status === 'In Transit') computedDots = 5;
       else if (dbLoad.status === 'DELIVERED' || dbLoad.status === 'Delivered' || dbLoad.status === 'COMPLETED') computedDots = 6;
       else if (dbLoad.status === 'PLANNED') computedDots = 1;
+      else if (dbLoad.status === 'DRAFT') computedDots = 0;
 
+      // Real driver only — strictly Unassigned if no driver linked
       const driverName = dbLoad.driver
         ? (`${dbLoad.driver.firstName || ''} ${dbLoad.driver.lastName || ''}`.trim() || dbLoad.driver.driverCode || 'Driver')
-        : (dbDrivers.length > 0 && dbDrivers[idx % dbDrivers.length]
-            ? `${dbDrivers[idx % dbDrivers.length].firstName || ''} ${dbDrivers[idx % dbDrivers.length].lastName || ''}`.trim()
-            : 'Unassigned');
+        : 'Unassigned';
 
-      const customerName = dbLoad.customer?.name || (dbCustomers.length > 0 ? dbCustomers[idx % dbCustomers.length]?.name : 'Direct Customer');
+      // Real customer only — fallback to Direct Customer
+      const customerName = dbLoad.customer?.name || 'Direct Customer';
+
+      // Real truck only — strictly Unassigned if no vehicle linked
+      const vehicleName = dbLoad.truck
+        ? `${dbLoad.truck.make || ''} ${dbLoad.truck.model || ''}`.trim()
+        : 'Unassigned';
+
+      const trailerName = dbLoad.trailer
+        ? (dbLoad.trailer.trailerNumber || dbLoad.trailer.rego || 'Trailer')
+        : (dbLoad.trailerId || 'None');
+
+      const regoName = dbLoad.truck?.rego || '—';
+
+      const isDraft = (dbLoad.status || '').toUpperCase() === 'DRAFT';
 
       return {
         id: loadRefStr,
         dbId: dbLoad.id,
-        status: dbLoad.status === 'IN_TRANSIT' ? 'In Transit' : dbLoad.status === 'ASSIGNED' ? 'En Route' : dbLoad.status === 'PLANNED' ? 'Planned' : dbLoad.status || 'Planned',
-        statusStyle: dbLoad.status === 'IN_TRANSIT' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+        status: isDraft ? 'Draft' : (dbLoad.status === 'IN_TRANSIT' ? 'In Transit' : dbLoad.status === 'ASSIGNED' ? 'En Route' : dbLoad.status === 'PLANNED' ? 'Planned' : dbLoad.status || 'Planned'),
+        statusStyle: isDraft ? 'bg-amber-50 text-amber-700 border-amber-300' : (
+          dbLoad.status === 'IN_TRANSIT' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
           dbLoad.status === 'ASSIGNED' ? 'bg-blue-50 text-blue-700 border-blue-200' :
           dbLoad.status === 'PLANNED' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-          'bg-slate-100 text-slate-700 border-slate-200',
-        accentColor: dbLoad.status === 'IN_TRANSIT' ? 'border-l-emerald-500' :
+          'bg-slate-100 text-slate-700 border-slate-200'
+        ),
+        accentColor: isDraft ? 'border-l-amber-400' : (
+          dbLoad.status === 'IN_TRANSIT' ? 'border-l-emerald-500' :
           dbLoad.status === 'ASSIGNED' ? 'border-l-blue-500' :
-          dbLoad.status === 'PLANNED' ? 'border-l-amber-500' : 'border-l-slate-400',
+          dbLoad.status === 'PLANNED' ? 'border-l-amber-500' : 'border-l-slate-400'
+        ),
         driver: driverName,
-        driverRole: 'Car Carrier',
+        driverRole: driverName === 'Unassigned' ? 'Not Assigned' : 'Car Carrier',
         driverAvatar: dbLoad.driver?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(driverName)}&background=e2e8f0&color=0f172a`,
         driverPhone: dbLoad.driver?.phone || 'N/A',
-        driverStatus: 'On Duty',
+        driverStatus: driverName === 'Unassigned' ? 'Unassigned' : 'On Duty',
         routeFrom: routeFromStr,
         routeTo: routeToStr,
         customer: customerName,
-        vehicle: dbLoad.truck ? `${dbLoad.truck.make || ''} ${dbLoad.truck.model || ''}`.trim() : (dbVehicles.length > 0 && dbVehicles[idx % dbVehicles.length] ? `${dbVehicles[idx % dbVehicles.length].make || ''} ${dbVehicles[idx % dbVehicles.length].model || ''}`.trim() : 'Volvo FH16 750'),
-        trailer: dbLoad.trailerId || 'TR-01',
-        rego: dbLoad.truck?.rego || (dbVehicles.length > 0 ? dbVehicles[idx % dbVehicles.length]?.rego : 'NEW-999'),
+        vehicle: vehicleName,
+        trailer: trailerName,
+        rego: regoName,
         truckPhoto: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=300',
         reqDate: dbLoad.loadDate ? (dbLoad.loadDate instanceof Date ? dbLoad.loadDate.toLocaleDateString('en-GB') : new Date(dbLoad.loadDate).toLocaleDateString('en-GB')) : new Date(dbLoad.createdAt).toLocaleDateString('en-GB'),
         reqTime: '05:00 PM',
