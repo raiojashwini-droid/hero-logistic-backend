@@ -1186,6 +1186,9 @@ model Vehicle {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id])
 
+  assignedTrailerId String?
+  assignedTruckId   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

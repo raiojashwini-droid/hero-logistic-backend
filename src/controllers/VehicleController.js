@@ -86,6 +86,19 @@ exports.getById = async (req, res, next) => {
         message: 'Vehicle not found'
       }, HTTP_STATUS.NOT_FOUND);
     }
+
+    if (data.assignedTrailerId) {
+      data.assignedTrailer = await prisma.vehicle.findUnique({
+        where: { id: data.assignedTrailerId },
+        include: { currentDriver: true }
+      }).catch(() => null);
+    }
+    if (data.assignedTruckId) {
+      data.assignedTruck = await prisma.vehicle.findUnique({
+        where: { id: data.assignedTruckId },
+        include: { currentDriver: true }
+      }).catch(() => null);
+    }
     
     return sendSuccess(res, data);
   } catch (error) {
@@ -129,7 +142,8 @@ const ALLOWED_VEHICLE_FIELDS = new Set([
   'regState', 'regIssueDate', 'regExpiryDate', 'maxDistPerTripKm', 
   'primaryMechanic', 'preferredRoutes', 'preferredRegions', 'dgCertified', 
   'hvCertified', 'status', 'companyId', 'currentLocation', 
-  'currentSpeed', 'fuelLevel', 'engineTemp', 'lastPing', 'currentDriverId', 'branchId', 'photoUrl'
+  'currentSpeed', 'fuelLevel', 'engineTemp', 'lastPing', 'currentDriverId', 'branchId', 'photoUrl',
+  'assignedTrailerId', 'assignedTruckId'
 ]);
 
 const sanitizePayload = (rawPayload) => {
@@ -173,10 +187,16 @@ const sanitizePayload = (rawPayload) => {
   }
 
   if (rawPayload.category || rawPayload.type || rawPayload.vehicleType || rawPayload.regType) {
-    const customType = String(rawPayload.regType || rawPayload.type || rawPayload.category || rawPayload.vehicleType || '').trim();
-    const c = customType.toUpperCase();
-    if (['TRUCK', 'TRAILER'].includes(c)) {
-      clean.category = c;
+    const explicitCat = String(rawPayload.category || '').toUpperCase().trim();
+    const customType = String(rawPayload.regType || rawPayload.type || rawPayload.vehicleType || '').trim();
+    const c = (customType + ' ' + explicitCat).toUpperCase();
+    
+    if (explicitCat === 'TRAILER' || explicitCat === 'TRUCK') {
+      clean.category = explicitCat;
+    } else if (c.includes('TRAILER')) {
+      clean.category = 'TRAILER';
+    } else if (c.includes('TRUCK')) {
+      clean.category = 'TRUCK';
     } else {
       clean.category = 'TRUCK';
     }
@@ -213,7 +233,7 @@ const sanitizePayload = (rawPayload) => {
   [
     'regType', 'regState', 'fuelType', 'color', 'engineNumber',
     'primaryMechanic', 'preferredRoutes', 'preferredRegions', 'currentLocation',
-    'currentDriverId', 'branchId'
+    'currentDriverId', 'branchId', 'assignedTrailerId', 'assignedTruckId'
   ].forEach(field => {
     if (rawPayload[field] !== undefined) {
       clean[field] = rawPayload[field] ? String(rawPayload[field]).trim() : null;
@@ -597,6 +617,267 @@ exports.delete = async (req, res, next) => {
       where: { id: vehId }
     });
     return sendSuccess(res, { id, message: 'Vehicle deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Attach Trailer to Truck (or Hitch Truck to Trailer)
+exports.attachTrailer = async (req, res, next) => {
+  try {
+    await syncMissingVehicleColumns();
+    const { id } = req.params;
+    const { trailerId: incomingTrailerId, truckId: incomingTruckId, notes, reason } = req.body;
+    const companyId = resolveCompanyId(req);
+
+    const where = { id };
+    if (req.user?.role !== 'SUPER_ADMIN') {
+      if (!companyId) {
+        return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required' }, HTTP_STATUS.FORBIDDEN);
+      }
+      where.companyId = companyId;
+    }
+
+    const currentVehicle = await prisma.vehicle.findFirst({ where });
+    if (!currentVehicle) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Vehicle not found' }, HTTP_STATUS.NOT_FOUND);
+    }
+
+    let truckId;
+    let trailerId;
+
+    if (currentVehicle.category === 'TRUCK') {
+      truckId = currentVehicle.id;
+      trailerId = incomingTrailerId || incomingTruckId;
+    } else {
+      trailerId = currentVehicle.id;
+      truckId = incomingTruckId || incomingTrailerId;
+    }
+
+    if (!trailerId) {
+      return sendError(res, { code: ERROR_CODES.VALIDATION_ERROR, message: 'Trailer ID is required' }, HTTP_STATUS.BAD_REQUEST);
+    }
+    if (!truckId) {
+      return sendError(res, { code: ERROR_CODES.VALIDATION_ERROR, message: 'Truck ID is required' }, HTTP_STATUS.BAD_REQUEST);
+    }
+    if (truckId === trailerId) {
+      return sendError(res, { code: ERROR_CODES.VALIDATION_ERROR, message: 'A vehicle cannot be attached to itself' }, HTTP_STATUS.BAD_REQUEST);
+    }
+
+    // Verify truck
+    const truck = await prisma.vehicle.findFirst({
+      where: {
+        id: truckId,
+        ...(req.user?.role !== 'SUPER_ADMIN' ? { companyId } : {})
+      }
+    });
+    if (!truck) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Truck not found in company fleet' }, HTTP_STATUS.NOT_FOUND);
+    }
+
+    // Verify trailer
+    const trailer = await prisma.vehicle.findFirst({
+      where: {
+        id: trailerId,
+        ...(req.user?.role !== 'SUPER_ADMIN' ? { companyId } : {})
+      }
+    });
+    if (!trailer) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Trailer not found in company fleet' }, HTTP_STATUS.NOT_FOUND);
+    }
+
+    // Validation: prevent trailer from being attached to another truck already
+    if (trailer.assignedTruckId && trailer.assignedTruckId !== truck.id) {
+      const existingTruck = await prisma.vehicle.findUnique({ where: { id: trailer.assignedTruckId } }).catch(() => null);
+      const truckLabel = existingTruck?.rego || existingTruck?.plate || trailer.assignedTruckId;
+      return sendError(res, {
+        code: ERROR_CODES.RESOURCE_CONFLICT,
+        message: `Trailer ${trailer.rego || trailer.plate} is already hitched to Prime Mover ${truckLabel}. Please detach it first.`
+      }, HTTP_STATUS.CONFLICT);
+    }
+
+    // Check if truck already has a different trailer attached -> Swap handling
+    const prevTrailerId = truck.assignedTrailerId;
+    if (prevTrailerId && prevTrailerId !== trailer.id) {
+      // Unhitch previous trailer
+      await prisma.vehicle.update({
+        where: { id: prevTrailerId },
+        data: {
+          assignedTruckId: null,
+          status: 'IDLE'
+        }
+      }).catch(err => console.error('Error detaching previous trailer:', err));
+    }
+
+    // Update truck
+    const updatedTruck = await prisma.vehicle.update({
+      where: { id: truck.id },
+      data: {
+        assignedTrailerId: trailer.id
+      },
+      include: {
+        currentDriver: true
+      }
+    });
+
+    // Update trailer
+    const updatedTrailer = await prisma.vehicle.update({
+      where: { id: trailer.id },
+      data: {
+        assignedTruckId: truck.id,
+        status: truck.status === 'IN_TRANSIT' ? 'IN_TRANSIT' : 'IDLE'
+      }
+    });
+
+    // Optionally log equipment swap record if driver exists
+    if (truck.currentDriverId && prisma.equipmentSwap) {
+      try {
+        await prisma.equipmentSwap.create({
+          data: {
+            driverId: truck.currentDriverId,
+            prevTrailerId: prevTrailerId || null,
+            newTrailerId: trailer.id,
+            swapType: prevTrailerId ? 'Trailer Swap' : 'Trailer Hitch',
+            reason: reason || 'Operational Attachment',
+            approvalStatus: 'Approved',
+            notes: notes || `Attached trailer ${trailer.rego || trailer.plate} to truck ${truck.rego || truck.plate}`
+          }
+        });
+      } catch (swapErr) {
+        console.warn('Could not record EquipmentSwap:', swapErr.message);
+      }
+    }
+
+    return sendSuccess(res, {
+      truck: updatedTruck,
+      trailer: updatedTrailer,
+      message: `Trailer ${trailer.rego || trailer.plate} attached to truck ${truck.rego || truck.plate} successfully`
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Detach / Unhitch Trailer
+exports.detachTrailer = async (req, res, next) => {
+  try {
+    await syncMissingVehicleColumns();
+    const { id } = req.params;
+    const companyId = resolveCompanyId(req);
+
+    const where = { id };
+    if (req.user?.role !== 'SUPER_ADMIN') {
+      if (!companyId) {
+        return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required' }, HTTP_STATUS.FORBIDDEN);
+      }
+      where.companyId = companyId;
+    }
+
+    const vehicle = await prisma.vehicle.findFirst({ where });
+    if (!vehicle) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Vehicle not found' }, HTTP_STATUS.NOT_FOUND);
+    }
+
+    let truckToUpdate = null;
+    let trailerToUpdate = null;
+
+    if (vehicle.category === 'TRUCK') {
+      truckToUpdate = vehicle;
+      if (vehicle.assignedTrailerId) {
+        trailerToUpdate = await prisma.vehicle.findUnique({ where: { id: vehicle.assignedTrailerId } }).catch(() => null);
+      }
+    } else {
+      trailerToUpdate = vehicle;
+      if (vehicle.assignedTruckId) {
+        truckToUpdate = await prisma.vehicle.findUnique({ where: { id: vehicle.assignedTruckId } }).catch(() => null);
+      }
+    }
+
+    if (truckToUpdate) {
+      await prisma.vehicle.update({
+        where: { id: truckToUpdate.id },
+        data: { assignedTrailerId: null }
+      });
+    }
+
+    if (trailerToUpdate) {
+      await prisma.vehicle.update({
+        where: { id: trailerToUpdate.id },
+        data: {
+          assignedTruckId: null,
+          status: 'IDLE' // Available in Yard
+        }
+      });
+    }
+
+    return sendSuccess(res, {
+      unhitched: true,
+      message: 'Trailer unhitched successfully. Status updated to Available in Yard.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Assign Driver to Truck (Cascades to attached trailer)
+exports.assignDriver = async (req, res, next) => {
+  try {
+    await syncMissingVehicleColumns();
+    const { id } = req.params;
+    const { driverId } = req.body;
+    const companyId = resolveCompanyId(req);
+
+    const where = { id };
+    if (req.user?.role !== 'SUPER_ADMIN') {
+      if (!companyId) {
+        return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required' }, HTTP_STATUS.FORBIDDEN);
+      }
+      where.companyId = companyId;
+    }
+
+    const truck = await prisma.vehicle.findFirst({ where });
+    if (!truck) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Vehicle not found' }, HTTP_STATUS.NOT_FOUND);
+    }
+
+    let driver = null;
+    if (driverId) {
+      driver = await prisma.driver.findFirst({
+        where: {
+          id: driverId,
+          ...(req.user?.role !== 'SUPER_ADMIN' ? { companyId } : {})
+        }
+      });
+      if (!driver) {
+        return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver not found' }, HTTP_STATUS.NOT_FOUND);
+      }
+    }
+
+    const updatedTruck = await prisma.vehicle.update({
+      where: { id: truck.id },
+      data: {
+        currentDriverId: driverId || null
+      },
+      include: {
+        currentDriver: true
+      }
+    });
+
+    let attachedTrailer = null;
+    if (updatedTruck.assignedTrailerId) {
+      attachedTrailer = await prisma.vehicle.findUnique({
+        where: { id: updatedTruck.assignedTrailerId }
+      }).catch(() => null);
+    }
+
+    return sendSuccess(res, {
+      truck: updatedTruck,
+      attachedTrailer,
+      driver,
+      message: driverId 
+        ? `Driver assigned to ${truck.rego || truck.plate}${attachedTrailer ? ` with attached trailer ${attachedTrailer.rego || attachedTrailer.plate}` : ''}`
+        : 'Driver unassigned from vehicle'
+    });
   } catch (error) {
     next(error);
   }

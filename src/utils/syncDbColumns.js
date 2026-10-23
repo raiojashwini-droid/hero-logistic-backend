@@ -30,6 +30,8 @@ async function syncMissingVehicleColumns() {
       `ALTER TABLE vehicle ADD COLUMN maxDistPerTripKm INT`,
       `ALTER TABLE vehicle ADD COLUMN dgCertified TINYINT(1) DEFAULT 0`,
       `ALTER TABLE vehicle ADD COLUMN hvCertified TINYINT(1) DEFAULT 0`,
+      `ALTER TABLE vehicle ADD COLUMN assignedTrailerId VARCHAR(255)`,
+      `ALTER TABLE vehicle ADD COLUMN assignedTruckId VARCHAR(255)`,
       `ALTER TABLE company ADD COLUMN dotNumber VARCHAR(255)`,
       `ALTER TABLE user ADD COLUMN branchId VARCHAR(255)`,
       `ALTER TABLE custom_role ADD COLUMN slug VARCHAR(255)`,

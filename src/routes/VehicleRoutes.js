@@ -15,4 +15,8 @@ router.route('/:id')
   .put(VehicleController.update)
   .delete(VehicleController.delete);
 
+router.post('/:id/attach-trailer', VehicleController.attachTrailer);
+router.post('/:id/detach-trailer', VehicleController.detachTrailer);
+router.post('/:id/assign-driver', VehicleController.assignDriver);
+
 module.exports = router;
