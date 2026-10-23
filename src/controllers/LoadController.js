@@ -951,13 +951,24 @@ exports.getActiveLoads = async (req, res, next) => {
         rego: regoName,
         truckPhoto: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=300',
         reqDate: dbLoad.loadDate ? (dbLoad.loadDate instanceof Date ? dbLoad.loadDate.toLocaleDateString('en-GB') : new Date(dbLoad.loadDate).toLocaleDateString('en-GB')) : new Date(dbLoad.createdAt).toLocaleDateString('en-GB'),
-        reqTime: '05:00 PM',
+        reqTime: (() => {
+          if (dbLoad.loadDate) {
+            const d = new Date(dbLoad.loadDate);
+            if (!isNaN(d.getTime()) && (d.getHours() !== 0 || d.getMinutes() !== 0)) {
+              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+          }
+          if (Array.isArray(dbLoad.stops) && dbLoad.stops[0]?.time) {
+            return dbLoad.stops[0].time;
+          }
+          return 'Flexible';
+        })(),
         progressStep: `${computedDots}/6`,
         activeDotsCount: computedDots,
         dotColor: 'bg-emerald-500',
         lineColor: 'bg-emerald-500',
-        stopsCount: dbLoad.stops?.length || 2,
-        itemsCount: dbLoad.items?.length || 0,
+        stopsCount: Array.isArray(dbLoad.stops) ? dbLoad.stops.length : 0,
+        itemsCount: Array.isArray(dbLoad.items) ? dbLoad.items.length : 0,
         rawLoad: dbLoad
       };
     });
