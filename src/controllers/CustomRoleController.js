@@ -143,8 +143,10 @@ exports.getAll = async (req, res, next) => {
       };
     });
 
-    // Order by hierarchy rank
-    merged.sort((a, b) => (ROLE_HIERARCHY[a.slug] || 99) - (ROLE_HIERARCHY[b.slug] || 99));
+    if (req.query.customOnly === 'true' || req.query.type === 'custom') {
+      const meta = buildPaginationMeta(customRolesList.length, 1, customRolesList.length, req.query.sort);
+      return sendList(res, customRolesList, meta);
+    }
 
     // Super Admin and Sales are platform-level SaaS roles managed exclusively by Super Admin
     let finalRoles = merged;
