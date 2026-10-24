@@ -729,6 +729,24 @@ exports.attachTrailer = async (req, res, next) => {
       }
     });
 
+    // Automatically sync active loads assigned to this truck (or its assigned driver) to reflect the new trailer
+    try {
+      await prisma.load.updateMany({
+        where: {
+          OR: [
+            { truckId: truck.id },
+            ...(truck.currentDriverId ? [{ driverId: truck.currentDriverId }] : [])
+          ],
+          status: { notIn: ['DELIVERED', 'COMPLETED', 'CANCELLED'] }
+        },
+        data: {
+          trailerId: trailer.id
+        }
+      });
+    } catch (loadSyncErr) {
+      console.warn('Could not sync active loads for trailer swap:', loadSyncErr.message);
+    }
+
     // Optionally log equipment swap record if driver exists
     if (truck.currentDriverId && prisma.equipmentSwap) {
       try {

@@ -121,12 +121,47 @@ class LoadService {
     const load = await prisma.load.findFirst({ where });
     if (!load) throw { code: ERROR_CODES.NOT_FOUND, message: 'Load not found' };
 
+    let targetTruckId = assignment.truckId || assignment.vehicleId || load.truckId;
+    let targetTrailerId = assignment.trailerId || load.trailerId;
+
+    // Auto-inherit truck and attached trailer from driver's current vehicle consist if not explicitly given
+    if (!targetTruckId && assignment.driverId) {
+      const linkedTruck = await prisma.vehicle.findFirst({
+        where: { currentDriverId: assignment.driverId }
+      }).catch(() => null);
+      if (linkedTruck) {
+        targetTruckId = linkedTruck.id;
+        if (!targetTrailerId && linkedTruck.assignedTrailerId) {
+          targetTrailerId = linkedTruck.assignedTrailerId;
+        }
+      }
+    }
+
+    // Auto-inherit trailer attached to the truck
+    if (targetTruckId && !targetTrailerId) {
+      const truckObj = await prisma.vehicle.findUnique({
+        where: { id: targetTruckId }
+      }).catch(() => null);
+      if (truckObj?.assignedTrailerId) {
+        targetTrailerId = truckObj.assignedTrailerId;
+      }
+    }
+
+    // Link driver to truck in vehicle table if both are assigned
+    if (assignment.driverId && targetTruckId) {
+      await prisma.vehicle.update({
+        where: { id: targetTruckId },
+        data: { currentDriverId: assignment.driverId }
+      }).catch(() => {});
+    }
+
     const updatedLoad = await prisma.load.update({
       where: { id: loadId },
       data: {
         driverId: assignment.driverId || load.driverId,
-        vehicleId: assignment.vehicleId || load.vehicleId,
-        trailerId: assignment.trailerId || load.trailerId,
+        truckId: targetTruckId || null,
+        trailerId: targetTrailerId || null,
+        status: (load.status === 'DRAFT' && assignment.driverId) ? 'ASSIGNED' : load.status,
         version: { increment: 1 }
       }
     });

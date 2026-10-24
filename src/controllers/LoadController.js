@@ -858,7 +858,18 @@ exports.getActiveLoads = async (req, res, next) => {
       }).catch(() => []),
       prisma.driver.findMany({
         where: companyWhere,
-        select: { id: true, firstName: true, lastName: true, driverCode: true, phone: true, avatarUrl: true, status: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          driverCode: true,
+          phone: true,
+          avatarUrl: true,
+          status: true,
+          currentVehicle: {
+            select: { id: true, make: true, model: true, rego: true, assignedTrailerId: true }
+          }
+        },
         orderBy: { createdAt: 'asc' }
       }).catch(() => []),
       prisma.customer.findMany({
@@ -873,10 +884,26 @@ exports.getActiveLoads = async (req, res, next) => {
       }).catch(() => []),
       prisma.vehicle.findMany({
         where: companyWhere,
-        select: { id: true, make: true, model: true, rego: true },
+        select: {
+          id: true,
+          make: true,
+          model: true,
+          rego: true,
+          category: true,
+          assignedTrailerId: true,
+          assignedTruckId: true,
+          currentDriverId: true
+        },
         orderBy: { createdAt: 'asc' }
       }).catch(() => [])
     ]);
+
+    const trailerList = dbVehicles.filter(v => 
+      v.category === 'TRAILER' || 
+      String(v.make || '').toLowerCase().includes('trailer') || 
+      String(v.model || '').toLowerCase().includes('trailer') ||
+      String(v.rego || '').toUpperCase().startsWith('TRL')
+    );
 
     const formattedLoads = dbLoads.map((dbLoad, idx) => {
       const loadRefStr = dbLoad.loadRef || (dbLoad.id && dbLoad.id.length > 18 ? `LD-${dbLoad.id.slice(0, 8).toUpperCase()}` : dbLoad.id);
@@ -978,7 +1005,8 @@ exports.getActiveLoads = async (req, res, next) => {
       drivers: dbDrivers,
       customers: dbCustomers,
       branches: dbBranches,
-      vehicles: dbVehicles
+      vehicles: dbVehicles,
+      trailers: trailerList
     });
   } catch (error) {
     next(error);

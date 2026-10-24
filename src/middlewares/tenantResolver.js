@@ -8,20 +8,20 @@ exports.resolveTenant = async (req, res, next) => {
   try {
     let tenantId = null;
 
-    // 1. If impersonation session exists in user token
-    if (req.user && req.user.impersonatedTenantId) {
-      tenantId = req.user.impersonatedTenantId;
-    } 
-    // 2. Access token claim (tenantId or companyId)
-    else if (req.user && (req.user.tenantId || req.user.companyId)) {
-      tenantId = req.user.tenantId || req.user.companyId;
-    }
-    // 3. Query string fallback for Super Admin testing
-    else if (req.user && req.user.role === 'SUPER_ADMIN' && req.query.companyId) {
-      tenantId = req.query.companyId;
-    }
-    // 4. Header fallback for tenant scoping / API testing
-    else if (req.headers && (req.headers['x-company-id'] || req.headers['x-tenant-id'])) {
+    if (req.user) {
+      if (req.user.role !== 'SUPER_ADMIN') {
+        // Authenticated non-super-admin users are strictly bound to their assigned company/tenant
+        tenantId = req.user.companyId || req.user.tenantId || null;
+      } else {
+        // Super Admin can impersonate, scope via query string or headers, or use their own tenant
+        tenantId = req.user.impersonatedTenantId ||
+          req.query?.companyId ||
+          (req.headers ? (req.headers['x-company-id'] || req.headers['x-tenant-id']) : null) ||
+          req.user.companyId ||
+          null;
+      }
+    } else if (req.headers && (req.headers['x-company-id'] || req.headers['x-tenant-id'])) {
+      // Unauthenticated fallback (e.g., public tenant-scoped webhook or pre-auth check)
       tenantId = req.headers['x-company-id'] || req.headers['x-tenant-id'];
     }
 
@@ -33,12 +33,25 @@ exports.resolveTenant = async (req, res, next) => {
 };
 
 exports.resolveCompanyId = (req) => {
+  // 1. Authenticated non-super-admin: strictly return the user's bound company/tenant
+  if (req.user && req.user.role !== 'SUPER_ADMIN') {
+    return req.user.companyId || req.user.tenantId || req.tenantId || null;
+  }
+
+  // 2. Authenticated Super Admin: allow impersonation, query override, header override, or user company
+  if (req.user && req.user.role === 'SUPER_ADMIN') {
+    return req.user.impersonatedTenantId ||
+      req.query?.companyId ||
+      (req.headers ? (req.headers['x-company-id'] || req.headers['x-tenant-id']) : null) ||
+      req.tenantId ||
+      req.user.companyId ||
+      null;
+  }
+
+  // 3. Fallback for unauthenticated / webhook requests
   return req.tenantId ||
-    req.user?.companyId ||
-    req.user?.tenantId ||
-    req.user?.impersonatedTenantId ||
-    (req.user?.role === 'SUPER_ADMIN' && req.query?.companyId ? req.query.companyId : null) ||
-    (req.headers ? (req.headers['x-company-id'] || req.headers['x-tenant-id']) : null);
+    (req.headers ? (req.headers['x-company-id'] || req.headers['x-tenant-id']) : null) ||
+    null;
 };
 
 exports.getTenantWhere = (req, strictTenant = false) => {
