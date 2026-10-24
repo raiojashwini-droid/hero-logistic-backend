@@ -49,7 +49,7 @@ const SYSTEM_ROLE_SEEDS = [
 // Company Admin sees same roles with parentPermissions and company overrides merged.
 exports.getAll = async (req, res, next) => {
   try {
-    // Always load the 9 global system roles first
+    // 1. Always ensure the 9 global system roles exist in DB
     let systemRoles = await prisma.customRole.findMany({
       where: { isSystem: true, companyId: null },
       include: { permissions: true },
@@ -58,33 +58,58 @@ exports.getAll = async (req, res, next) => {
 
     if (!systemRoles || systemRoles.length === 0) {
       for (const seed of SYSTEM_ROLE_SEEDS) {
-        await prisma.customRole.upsert({
-          where: { slug: seed.slug },
-          update: {},
-          create: seed
-        }).catch(() => {});
+        try {
+          const existing = await prisma.customRole.findFirst({
+            where: { slug: seed.slug, companyId: null }
+          });
+          if (!existing) {
+            await prisma.customRole.create({
+              data: {
+                name: seed.name,
+                slug: seed.slug,
+                isSystem: true,
+                companyId: null
+              }
+            });
+          }
+        } catch (seedErr) {
+          console.warn('Seed role error:', seedErr?.message);
+        }
       }
       systemRoles = await prisma.customRole.findMany({
         where: { isSystem: true, companyId: null },
         include: { permissions: true },
         orderBy: { createdAt: 'asc' }
-      });
+      }).catch(() => []);
     }
 
-    // Check for company-level permission overrides
-    let companyOverrides = {};
-    if (req.tenantId) {
-      const overrides = await prisma.customRole.findMany({
-        where: { companyId: req.tenantId, isSystem: false },
+    // 2. Fetch company-specific roles (both system overrides and new custom roles)
+    const companyId = req.tenantId || req.user?.companyId;
+    let companyRoles = [];
+    if (companyId) {
+      companyRoles = await prisma.customRole.findMany({
+        where: { companyId },
         include: { permissions: true }
-      });
-      overrides.forEach(o => {
-        if (o.slug) companyOverrides[o.slug] = o;
-      });
+      }).catch(() => []);
     }
 
-    // Merge: parentPermissions = system role permissions (Super Admin master)
-    // permissions = company override permissions capped by parent permissions
+    // Map system role overrides
+    const companyOverrides = {};
+    const customRolesList = [];
+
+    companyRoles.forEach(r => {
+      if (SYSTEM_ROLE_SEEDS.some(s => s.slug === r.slug)) {
+        companyOverrides[r.slug] = r;
+      } else {
+        customRolesList.push({
+          ...formatRolePermissions(r),
+          isSystem: false,
+          parentPermissions: {}
+        });
+      }
+    });
+
+    // 3. Merge system roles with company overrides
     const merged = systemRoles.map(sysRole => {
       const formattedSystem = formatRolePermissions(sysRole);
       const parentPerms = formattedSystem.permissions;
@@ -94,7 +119,6 @@ exports.getAll = async (req, res, next) => {
       if (override) {
         const formattedOverride = formatRolePermissions(override);
         const childPerms = formattedOverride.permissions;
-        // Cap child permissions by parent permissions (child cannot have permissions parent denied)
         effectivePerms = {};
         Object.entries(parentPerms).forEach(([mod, pActions]) => {
           effectivePerms[mod] = {};
@@ -124,14 +148,26 @@ exports.getAll = async (req, res, next) => {
 
     // Super Admin and Sales are platform-level SaaS roles managed exclusively by Super Admin
     let finalRoles = merged;
-    if (req.tenantId && req.user?.role !== 'SUPER_ADMIN') {
+    if (companyId && req.user?.role !== 'SUPER_ADMIN') {
       finalRoles = merged.filter(r => r.slug !== 'SUPER_ADMIN' && r.slug !== 'SALES');
     }
+    finalRoles = [...finalRoles, ...customRolesList];
 
     const meta = buildPaginationMeta(finalRoles.length, 1, finalRoles.length, req.query.sort);
     return sendList(res, finalRoles, meta);
   } catch (error) {
-    next(error);
+    console.warn('CustomRoleController.getAll fallback triggered:', error?.message);
+    const fallbackList = SYSTEM_ROLE_SEEDS
+      .filter(s => req.user?.role === 'SUPER_ADMIN' || (s.slug !== 'SUPER_ADMIN' && s.slug !== 'SALES'))
+      .map(s => ({
+        id: `seed_${s.slug.toLowerCase()}`,
+        name: s.name,
+        slug: s.slug,
+        isSystem: true,
+        permissions: {},
+        parentPermissions: {}
+      }));
+    return sendList(res, fallbackList, buildPaginationMeta(fallbackList.length, 1, fallbackList.length));
   }
 };
 
@@ -164,12 +200,37 @@ exports.getById = async (req, res, next) => {
   }
 };
 
-// CREATE is BLOCKED — system roles are fixed, nobody can add new ones
+// CREATE: Allows Company Admin or Super Admin to create a custom company role
 exports.create = async (req, res, next) => {
-  return sendError(res, {
-    code: 'FORBIDDEN',
-    message: 'System roles are fixed and cannot be created. Only the 9 predefined system roles exist.'
-  }, 403);
+  try {
+    const { name, desc } = req.body;
+    if (!name || !name.trim()) {
+      return sendError(res, { code: ERROR_CODES.VALIDATION_ERROR, message: 'Role name is required' }, HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const companyId = req.tenantId || req.user?.companyId;
+    if (!companyId && req.user?.role !== 'SUPER_ADMIN') {
+      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required to create role' }, HTTP_STATUS.FORBIDDEN);
+    }
+
+    const baseSlug = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const cleanSlug = `ROLE_${baseSlug}_${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+
+    const newRole = await prisma.customRole.create({
+      data: {
+        name: name.trim(),
+        slug: cleanSlug,
+        isSystem: false,
+        companyId: companyId || null
+      },
+      include: { permissions: true }
+    });
+
+    return sendSuccess(res, formatRolePermissions(newRole), HTTP_STATUS.CREATED);
+  } catch (error) {
+    console.error('CustomRoleController.create error:', error);
+    next(error);
+  }
 };
 
 // Update permissions only — role name is always protected and cannot be changed.
@@ -322,11 +383,17 @@ exports.update = async (req, res, next) => {
 };
 
 
-// DELETE — blocked for system roles; allowed for company-level override copies only
+// DELETE — blocked for system roles; allowed for company-level custom roles and overrides
 exports.delete = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const existing = await prisma.customRole.findFirst({ where: { id } });
+    const companyId = req.tenantId || req.user?.companyId;
+    const existing = await prisma.customRole.findFirst({
+      where: {
+        id,
+        ...(companyId && req.user?.role !== 'SUPER_ADMIN' ? { companyId } : {})
+      }
+    });
     if (!existing) return res.status(HTTP_STATUS.NO_CONTENT).send();
 
     if (existing.isSystem) {

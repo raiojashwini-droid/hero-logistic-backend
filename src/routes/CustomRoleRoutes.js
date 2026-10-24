@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const CustomRoleController = require('../controllers/CustomRoleController');
 const auth = require('../middlewares/auth');
+const { resolveTenant } = require('../middlewares/tenantResolver');
 
-// Default open for testing, uncomment auth to protect routes
-router.use(auth.verifyToken);
+router.use(auth.verifyToken, resolveTenant);
 
 router.route('/')
   .get(CustomRoleController.getAll)
