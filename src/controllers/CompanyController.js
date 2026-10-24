@@ -164,63 +164,50 @@ exports.create = async (req, res, next) => {
     }
 
     // Hash password prior to creation (or auto-generate initial temp password for EMAIL_LINK mode)
-    let hashedPassword = null;
-    const effectivePassword = adminPassword || (passwordSetupType === 'EMAIL_LINK' || !adminPassword ? `HeroSetup_${Date.now().toString(36)}!${Math.floor(Math.random() * 1000)}` : null);
-    if (cleanEmail && effectivePassword) {
-      hashedPassword = await bcrypt.hash(effectivePassword, 10);
-    }
+    const effectivePassword = adminPassword || (passwordSetupType === 'EMAIL_LINK' || !adminPassword ? `Hero_${Date.now().toString().slice(-4)}!${Math.floor(100 + Math.random() * 900)}` : 'Hero@123456');
+    const hashedPassword = await bcrypt.hash(effectivePassword, 10);
 
-    // 1. Create the Company
-    const company = await prisma.company.create({
-      data: {
-        name: cleanName,
-        tenantId: generatedTenantId,
-        status: status || 'ACTIVE',
-        accountManager: cleanAccountManager,
-        country: country ? String(country).trim() : null,
-        trialExpiry: trialExpiry ? new Date(trialExpiry) : null,
-        adminEmail: cleanEmail
-      }
-    });
+    // Atomic Transaction: Both Company and Admin User must be created together, or neither
+    const transactionResult = await prisma.$transaction(async (tx) => {
+      // 1. Create the Company
+      const newCompany = await tx.company.create({
+        data: {
+          name: cleanName,
+          tenantId: generatedTenantId,
+          status: status || 'ACTIVE',
+          accountManager: cleanAccountManager,
+          country: country ? String(country).trim() : null,
+          trialExpiry: trialExpiry ? new Date(trialExpiry) : null,
+          adminEmail: cleanEmail
+        }
+      });
 
-    await prisma.auditLog.create({
-      data: {
-        action: `SYSTEM::New workspace registered: ${cleanName} (${generatedTenantId}) [PasswordMode: ${passwordSetupType || (adminPassword ? 'MANUAL' : 'EMAIL_LINK')}]`,
-        operator: 'System Registration',
-        companyId: company.id
-      }
-    });
-
-    // 2. Create the Workspace Manager (User) if credentials are provided
-    if (cleanEmail && hashedPassword) {
-      try {
-        await prisma.user.create({
+      // 2. Create the Workspace Manager (User) with role COMPANY_ADMIN
+      let createdUser = null;
+      if (cleanEmail) {
+        createdUser = await tx.user.create({
           data: {
             email: cleanEmail,
             password: hashedPassword,
             name: `${cleanName} Admin`,
             role: 'COMPANY_ADMIN',
-            companyId: company.id,
+            companyId: newCompany.id,
             status: 'ACTIVE'
           }
         });
-      } catch (userErr) {
-        console.warn('Could not auto-create company admin user:', userErr?.message);
       }
-    }
 
-    // 3. Setup the TenantSubscription if a plan is provided
-    if (planTier) {
-      const plan = await prisma.subscriptionPlan.findFirst({
-        where: { name: planTier }
-      });
-      
-      if (plan) {
-        try {
-          await prisma.tenantSubscription.create({
+      // 3. Setup the TenantSubscription if a plan is provided
+      if (planTier) {
+        const plan = await tx.subscriptionPlan.findFirst({
+          where: { name: planTier }
+        });
+        
+        if (plan) {
+          await tx.tenantSubscription.create({
             data: {
               subId: `SUB-${Date.now()}`,
-              companyId: company.id,
+              companyId: newCompany.id,
               planId: plan.id,
               status: 'ACTIVE',
               amount: plan.monthlyPrice,
@@ -229,43 +216,57 @@ exports.create = async (req, res, next) => {
           });
 
           // Auto-generate initial Billing Record (Invoice)
-          await prisma.billingRecord.create({
+          await tx.billingRecord.create({
             data: {
               invoiceNumber: `INV-${Date.now()}`,
               amount: plan.monthlyPrice,
-              status: 'PAID', // Set initial invoice to PAID for MRR/Revenue metrics
+              status: 'PAID',
               planTierSnapshot: plan.name,
-              companyId: company.id,
+              companyId: newCompany.id,
               periodStart: new Date(),
               periodEnd: new Date(new Date().setMonth(new Date().getMonth() + 1)),
               dueDate: new Date(new Date().setDate(new Date().getDate() + 7))
             }
           });
-
-          await prisma.auditLog.create({
-            data: {
-              action: `BILLING::Plan subscribed: ${plan.name} at $${plan.monthlyPrice}/mo for ${cleanName}`,
-              operator: 'Billing System',
-              companyId: company.id
-            }
-          });
-        } catch (subErr) {
-          console.warn('Could not auto-create tenant subscription or billing record:', subErr?.message);
         }
       }
-    }
 
-    // 4. Fetch full company with subscription details to return
+      // 4. System Audit Log
+      await tx.auditLog.create({
+        data: {
+          action: `SYSTEM::New workspace registered: ${cleanName} (${generatedTenantId}) [Admin: ${cleanEmail || 'None'}]`,
+          operator: 'System Registration',
+          companyId: newCompany.id
+        }
+      });
+
+      return { company: newCompany, user: createdUser };
+    });
+
+    // 5. Fetch full company with subscription details to return
     const result = await prisma.company.findUnique({
-      where: { id: company.id },
+      where: { id: transactionResult.company.id },
       include: {
         tenantSubscription: {
           include: { plan: true }
+        },
+        users: {
+          where: { role: 'COMPANY_ADMIN' },
+          select: { id: true, email: true, name: true, role: true }
         }
       }
     });
 
-    return sendSuccess(res, result || company, HTTP_STATUS.CREATED);
+    const responsePayload = {
+      ...(result || transactionResult.company),
+      credentials: {
+        email: cleanEmail,
+        password: effectivePassword,
+        role: 'COMPANY_ADMIN'
+      }
+    };
+
+    return sendSuccess(res, responsePayload, HTTP_STATUS.CREATED);
   } catch (error) {
     if (error.code === 'P2002') {
       const target = error.meta?.target || [];

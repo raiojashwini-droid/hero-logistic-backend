@@ -53,38 +53,6 @@ exports.verifyToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      const decoded = jwt.decode(token);
-      if (decoded) {
-        const userId = decoded.userId || decoded.id;
-        req.user = { ...decoded, id: userId, userId };
-        try {
-          const prisma = require('../utils/prismaClient');
-          const dbUser = await prisma.user.findUnique({
-            where: { id: userId },
-            include: {
-              customRole: {
-                include: {
-                  permissions: true
-                }
-              }
-            }
-          });
-          if (dbUser) {
-            req.user.companyId = dbUser.companyId || req.user.companyId || null;
-            req.user.tenantId = dbUser.companyId || req.user.tenantId || null;
-            req.user.branchId = dbUser.branchId || null;
-            req.user.role = dbUser.role || req.user.role;
-            req.user.permissions = dbUser.customRole?.permissions?.map(p => p.actionString) || [];
-          }
-        } catch (fallbackDbErr) {
-          console.warn('Auth middleware fallback lookup warning:', fallbackDbErr?.message || fallbackDbErr);
-        }
-        req.tenantId = req.user?.companyId || req.user?.tenantId || null;
-        req.companyId = req.tenantId;
-        return next();
-      }
-    }
     return sendError(res, {
       code: ERROR_CODES.UNAUTHORIZED_ACCESS,
       message: 'Invalid or expired access token.'

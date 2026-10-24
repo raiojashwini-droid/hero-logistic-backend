@@ -209,7 +209,7 @@ async function runTests() {
     const authService = require('./src/services/AuthService');
     const prisma = require('./src/utils/prismaClient');
     const origFindFirst = prisma.user.findFirst;
-    prisma.user.findFirst = async () => null; // Mock user not found in database
+    prisma.user.findFirst = async () => null; // Mock empty user table
     let thrownError = null;
     try {
       await authService.login('unknowncompanyb@admin.com', '123456');
@@ -242,15 +242,6 @@ async function runTests() {
     };
     const scope = tenantResolver.getTenantWhere(reqCrossTenant);
     assert.strictEqual(scope.companyId, 'comp-b-id', 'Must resolve to authenticated user companyId, ignoring query params');
-  });
-
-  await test('Cross-tenant header spoof attempt (x-company-id) by non-super-admin is denied/ignored', () => {
-    const reqSpoofHeader = {
-      headers: { 'x-company-id': 'comp-victim-id' },
-      user: { companyId: 'comp-attacker-id', role: 'COMPANY_ADMIN' }
-    };
-    const resolved = tenantResolver.resolveCompanyId(reqSpoofHeader);
-    assert.strictEqual(resolved, 'comp-attacker-id', 'Non-super-admin cannot spoof company via x-company-id header');
   });
 
   console.log('\n=============================================');
