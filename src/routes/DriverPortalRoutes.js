@@ -52,10 +52,14 @@ router.post('/documents', DriverPortalController.uploadDriverDocument);
 
 // Timesheets & Clock In/Out
 router.get('/timesheets', DriverPortalController.getTimesheets);
+router.get('/timesheet', DriverPortalController.getTimesheets);
 router.post('/timesheets/clock', DriverPortalController.clockIn);
 router.post('/timesheets/clock-in', DriverPortalController.clockIn);
+router.post('/timesheet/clock-in', DriverPortalController.clockIn);
 router.post('/timesheets/clock-out', DriverPortalController.clockOut);
+router.post('/timesheet/clock-out', DriverPortalController.clockOut);
 router.post('/timesheets/toggle-break', DriverPortalController.toggleBreak);
+router.post('/timesheet/toggle-break', DriverPortalController.toggleBreak);
 router.post('/timesheets/notes', DriverPortalController.addTimesheetNote);
 router.post('/timesheets/submit', DriverPortalController.submitTimesheet);
 

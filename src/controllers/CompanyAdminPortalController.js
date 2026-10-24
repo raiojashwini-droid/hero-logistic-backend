@@ -914,17 +914,38 @@ exports.autoCreditDriverPayroll = async (loadId, driverId, companyId = null, cus
         if (match && match[1]) tripCredit = parseFloat(match[1]);
       }
     }
+    const payTypeStr = (driver.payType || '').toLowerCase();
+    const isHourly = payTypeStr.includes('hour');
+    const isPerKm = payTypeStr.includes('km') || payTypeStr.includes('kilo');
+
     if (!tripCredit || tripCredit === 0) {
       try {
-        const { calculateDriverPayForLoad } = require('../utils/driverPayCalculator');
-        const calc = calculateDriverPayForLoad({ driver, load });
-        if (calc && calc.grossPay > 0) {
-          tripCredit = calc.grossPay;
-        } else if (driver.payRate && !isNaN(parseFloat(driver.payRate))) {
-          tripCredit = parseFloat(driver.payRate);
+        if (isHourly) {
+          let hours = 0;
+          if (load.departedAt && load.deliveredAt) {
+            hours = Math.max(0.5, (new Date(load.deliveredAt) - new Date(load.departedAt)) / (1000 * 60 * 60));
+          } else if (load.estimatedTransitHours) {
+            hours = parseFloat(load.estimatedTransitHours);
+          } else {
+            hours = 1;
+          }
+          const rate = parseFloat(driver.payRate) || 0;
+          tripCredit = Math.round(hours * rate * 100) / 100;
+        } else if (isPerKm) {
+          const km = parseFloat(load.distanceKm || load.totalKm || 0);
+          const rate = parseFloat(driver.payRate) || 0;
+          tripCredit = Math.round(km * rate * 100) / 100;
+        } else {
+          const { calculateDriverPayForLoad } = require('../utils/driverPayCalculator');
+          const calc = calculateDriverPayForLoad({ driver, load });
+          if (calc && calc.grossPay > 0) {
+            tripCredit = calc.grossPay;
+          } else if (driver.payRate && !isNaN(parseFloat(driver.payRate))) {
+            tripCredit = parseFloat(driver.payRate);
+          }
         }
       } catch (cErr) {
-        if (driver.payRate && !isNaN(parseFloat(driver.payRate))) {
+        if (!isHourly && driver.payRate && !isNaN(parseFloat(driver.payRate))) {
           tripCredit = parseFloat(driver.payRate);
         }
       }
@@ -1364,6 +1385,26 @@ exports.createDriver = async (req, res, next) => {
       }
     }
 
+    let managerIdVal = payload.managerId || null;
+    const repTo = payload.ReportsTo || payload.reportsTo;
+    if (!managerIdVal && repTo && repTo !== '—') {
+      const foundMgr = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: repTo },
+            { name: { equals: repTo } },
+            { email: { equals: repTo } }
+          ],
+          companyId: effectiveCompanyId
+        }
+      }).catch(() => null);
+      if (foundMgr) managerIdVal = foundMgr.id;
+    }
+
+    const emergencyName = payload.EmergencyContactName || payload.emergencyContactName || '';
+    const emergencyNum = payload.EmergencyContactNumber || payload.emergencyContactPhone || '';
+    const emergencyCombined = payload.emergencyContact || (emergencyName ? `${emergencyName} ${emergencyNum}`.trim() : emergencyNum) || null;
+
     const driverData = {
       firstName: payload.firstName || payload.FirstName || null,
       lastName: payload.lastName || payload.LastName || null,
@@ -1371,15 +1412,43 @@ exports.createDriver = async (req, res, next) => {
       email: (payload.email || payload.EmailAddress || payload.Username || payload.username || '').trim() || null,
       avatarUrl: cleanAvatarUrl(payload.avatarUrl || payload.photoPreview || payload.avatar || null),
       driverCode: (payload.driverCode || payload.EmployeeIDManualEditOption || '').trim() || null,
-      licenseType: payload.licenceType || payload.licenseType || null,
+      gender: payload.gender || payload.Gender || null,
+      nationality: payload.nationality || payload.Nationality || null,
+      emergencyContact: emergencyCombined,
+      address: payload.address || payload.ResidentialAddress || null,
+      city: payload.city || payload.City || null,
+      state: payload.state || payload.State || null,
+      postalCode: payload.postalCode || payload.PostalCode || null,
+      licenseType: payload.licenceType || payload.licenseType || payload.licenseClass || payload.LicenceClass || null,
       licenseNumber: payload.licenceNumber || payload.licenseNumber || null,
+      licenseState: payload.licenseState || payload.LicenceState || null,
+      licenseClass: payload.licenseClass || payload.licenceClass || payload.LicenceClass || null,
+      licenseIssueDate: (payload.licenseIssueDate || payload.IssueDate) ? new Date(payload.licenseIssueDate || payload.IssueDate) : null,
+      licenseExpiry: (payload.licenseExpiry || payload.ExpiryDate) ? new Date(payload.licenseExpiry || payload.ExpiryDate) : null,
       status: validStatus,
       role: payload.role || payload.driverRole || 'Driver',
       category: payload.category || payload.driverCategory || null,
       shift: payload.shift || null,
       companyId: effectiveCompanyId,
+      branchId: payload.branchId || null,
+      managerId: managerIdVal,
+      // Payroll & Tax
       payType: payload.payType || payload.PayType || 'Hourly',
       payRate: (payload.payRate || payload.PayRate) ? parseFloat(payload.payRate || payload.PayRate) : null,
+      ordinaryHoursPerDay: payload.ordinaryHoursPerDay ? parseFloat(payload.ordinaryHoursPerDay) : 7.6,
+      overtimeStartsAfter: payload.overtimeStartsAfter ? parseFloat(payload.overtimeStartsAfter) : 7.6,
+      overtimeRate: payload.overtimeRate ? parseFloat(payload.overtimeRate) : null,
+      overtimeMultiplier: payload.overtimeMultiplier ? parseFloat(payload.overtimeMultiplier) : 1.5,
+      defaultBreakMinutes: payload.defaultBreakMinutes ? parseInt(payload.defaultBreakMinutes, 10) : 30,
+      tfnStatus: payload.tfnStatus || payload.TFNStatus || 'Provided',
+      taxFreeThreshold: payload.taxFreeThreshold !== undefined ? (payload.taxFreeThreshold === true || payload.taxFreeThreshold === 'Yes' || payload.taxFreeThreshold === 'true') : true,
+      studyLoanDebt: payload.studyLoanDebt !== undefined ? (payload.studyLoanDebt === true || payload.studyLoanDebt === 'Yes' || payload.studyLoanDebt === 'true') : false,
+      taxDeclReceived: payload.taxDeclReceived !== undefined ? (payload.taxDeclReceived === true || payload.taxDeclReceived === 'Yes' || payload.taxDeclReceived === 'true') : true,
+      residencyStatus: payload.residencyStatus || 'Australian Resident',
+      paygCalcMethod: payload.paygCalcMethod || 'ATO Scale',
+      superPercentage: payload.superPercentage ? parseFloat(payload.superPercentage) : 12.0,
+      effectiveFrom: payload.effectiveFrom ? new Date(payload.effectiveFrom) : null,
+      effectiveTo: payload.effectiveTo ? new Date(payload.effectiveTo) : null,
       loadPaySchedule: typeof payload.loadPaySchedule === 'object' ? JSON.stringify(payload.loadPaySchedule) : (payload.loadPaySchedule || null),
       bankName: payload.bankName || payload.BankName || null,
       accountNumber: payload.accountNumber || payload.AccountNumber || null,
@@ -1388,20 +1457,19 @@ exports.createDriver = async (req, res, next) => {
       superFund: payload.superFund || payload.SuperannuationFund || null
     };
 
-    if (payload.employmentType || payload.EmploymentType) {
-      const e = String(payload.employmentType || payload.EmploymentType).toUpperCase().replace(/\s+/g, '_');
-      if (['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR'].includes(e)) {
-        driverData.employmentType = e;
-      } else {
-        driverData.employmentType = null;
+    if (payload.dob || payload.DateofBirth) {
+      const d = new Date(payload.dob || payload.DateofBirth);
+      if (!isNaN(d.getTime())) {
+        driverData.dob = d;
+        driverData.joiningDate = payload.joiningDate ? new Date(payload.joiningDate) : d;
       }
-    } else {
-      driverData.employmentType = null;
     }
 
-    if (payload.dob) {
-      const d = new Date(payload.dob);
-      if (!isNaN(d.getTime())) driverData.joiningDate = d;
+    if (payload.employmentType || payload.EmploymentType) {
+      const e = String(payload.employmentType || payload.EmploymentType).toUpperCase().replace(/[\s-]+/g, '_');
+      if (['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR'].includes(e)) {
+        driverData.employmentType = e;
+      }
     }
 
     if (driverData.email) {
@@ -1494,6 +1562,10 @@ exports.createVehicle = async (req, res, next) => {
       odometerKm: rawPayload.odometerKm && !isNaN(rawPayload.odometerKm) ? parseInt(rawPayload.odometerKm) : 0,
       maintenanceDueKm: rawPayload.maintenanceDueKm && !isNaN(rawPayload.maintenanceDueKm) ? parseInt(rawPayload.maintenanceDueKm) : null,
       primaryMechanic: rawPayload.primaryMechanic || null,
+      regType: rawPayload.regType || null,
+      regState: rawPayload.regState || null,
+      regExpiryDate: rawPayload.regExpiryDate ? (!isNaN(new Date(rawPayload.regExpiryDate).getTime()) ? new Date(rawPayload.regExpiryDate) : null) : null,
+      regIssueDate: rawPayload.regIssueDate ? (!isNaN(new Date(rawPayload.regIssueDate).getTime()) ? new Date(rawPayload.regIssueDate) : null) : null,
       photoUrl: photoUrlVal
     };
 

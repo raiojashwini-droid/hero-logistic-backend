@@ -2939,40 +2939,103 @@ exports.clockOut = async (req, res, next) => {
         }).catch(() => null);
 
         // Sync calculation to PayPeriod
+        let shiftSummaryData = null;
         try {
-          const { calculateHourlyDriverPay } = require('../utils/driverPayCalculator');
+          const { calculateHourlyDriverPay, calculatePerKmDriverPay, calculatePerLoadDriverPay } = require('../utils/driverPayCalculator');
           const hoursWorked = Math.round((netWorkMinutes / 60) * 100) / 100;
-          const payCalc = calculateHourlyDriverPay({
-            hoursWorked,
-            hourlyRate: driver.payRate || 0,
-            ordinaryHoursPerDay: driver.ordinaryHoursPerDay || 7.6,
-            overtimeStartsAfter: driver.overtimeStartsAfter || 7.6,
-            overtimeRate: driver.overtimeRate,
-            overtimeMultiplier: driver.overtimeMultiplier || 1.5,
-            superPercentage: driver.superPercentage || 12.0,
-            taxFreeThreshold: driver.taxFreeThreshold !== false,
-            studyLoanDebt: driver.studyLoanDebt === true,
-            residencyStatus: driver.residencyStatus || 'Australian Resident'
-          });
+          const payTypeStr = (driver.payType || 'Hourly').toLowerCase();
 
-          if (payCalc && payCalc.grossPay > 0 && driver.companyId) {
-            const existingPeriod = await prisma.payPeriod.findFirst({
-              where: { driverId: driver.id, status: { in: ['DRAFT', 'PROCESSING', 'PENDING'] } },
-              orderBy: { createdAt: 'desc' }
-            }).catch(() => null);
+          let payCalc = null;
+          if (payTypeStr.includes('km') || payTypeStr.includes('kilomet')) {
+            const distanceKm = totalShiftMinutes > 0 ? Math.round((netWorkMinutes / 60) * 60) : 0;
+            payCalc = calculatePerKmDriverPay({ distanceKm, perKmRate: driver.payRate || 0 });
+          } else if (payTypeStr.includes('load')) {
+            payCalc = calculatePerLoadDriverPay({ driverRate: driver.payRate || 0, driver });
+          } else {
+            // Hourly (Default)
+            payCalc = calculateHourlyDriverPay({
+              hoursWorked,
+              hourlyRate: driver.payRate || 0,
+              ordinaryHoursPerDay: driver.ordinaryHoursPerDay || 7.6,
+              overtimeStartsAfter: driver.overtimeStartsAfter || 7.6,
+              overtimeRate: driver.overtimeRate,
+              overtimeMultiplier: driver.overtimeMultiplier || 1.5,
+              superPercentage: driver.superPercentage || 11.5,
+              taxFreeThreshold: driver.taxFreeThreshold !== false,
+              studyLoanDebt: driver.studyLoanDebt === true,
+              residencyStatus: driver.residencyStatus || 'Australian Resident'
+            });
+          }
 
-            if (existingPeriod) {
-              await prisma.payPeriod.update({
-                where: { id: existingPeriod.id },
-                data: {
-                  basePay: (existingPeriod.basePay || 0) + payCalc.ordinaryPay,
-                  grossEarnings: (existingPeriod.grossEarnings || 0) + payCalc.grossPay,
-                  paygTax: (existingPeriod.paygTax || 0) + payCalc.paygTax,
-                  superAmount: (existingPeriod.superAmount || 0) + payCalc.superContribution,
-                  totalDeductions: (existingPeriod.totalDeductions || 0) + payCalc.paygTax,
-                  netPay: Math.max(0, (existingPeriod.grossEarnings || 0) + payCalc.grossPay - ((existingPeriod.paygTax || 0) + payCalc.paygTax))
-                }
+          if (payCalc && driver.companyId) {
+            shiftSummaryData = {
+              clockInTime: clockInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              clockOutTime: clockOutTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              totalShiftMinutes,
+              totalBreakMinutes,
+              netWorkMinutes,
+              hoursWorked,
+              grossPay: payCalc.grossPay,
+              formattedGross: `$${payCalc.grossPay.toFixed(2)}`,
+              paygTax: payCalc.paygTax || 0,
+              formattedTax: `$${(payCalc.paygTax || 0).toFixed(2)}`,
+              superAmount: payCalc.superContribution || 0,
+              formattedSuper: `$${(payCalc.superContribution || 0).toFixed(2)}`,
+              netPay: payCalc.netPay || payCalc.grossPay,
+              formattedNet: `$${(payCalc.netPay || payCalc.grossPay).toFixed(2)}`
+            };
+
+            if (payCalc.grossPay > 0) {
+              const existingPeriod = await prisma.payPeriod.findFirst({
+                where: { driverId: driver.id, status: { in: ['DRAFT', 'PROCESSING', 'PENDING'] } },
+                orderBy: { createdAt: 'desc' }
               }).catch(() => null);
+
+              if (existingPeriod) {
+                const newGross = Math.round(((existingPeriod.grossEarnings || 0) + payCalc.grossPay) * 100) / 100;
+                const newTax = Math.round(((existingPeriod.paygTax || 0) + (payCalc.paygTax || 0)) * 100) / 100;
+                const newSuper = Math.round(((existingPeriod.superAmount || 0) + (payCalc.superContribution || 0)) * 100) / 100;
+                const newNet = Math.max(0, Math.round((newGross - newTax) * 100) / 100);
+
+                await prisma.payPeriod.update({
+                  where: { id: existingPeriod.id },
+                  data: {
+                    basePay: Math.round(((existingPeriod.basePay || 0) + (payCalc.ordinaryPay || payCalc.grossPay)) * 100) / 100,
+                    grossEarnings: newGross,
+                    paygTax: newTax,
+                    superAmount: newSuper,
+                    totalDeductions: newTax,
+                    netPay: newNet
+                  }
+                }).catch(() => null);
+              } else {
+                const now = new Date();
+                const periodStart = new Date(now);
+                periodStart.setDate(periodStart.getDate() - (periodStart.getDay() || 7) + 1);
+                periodStart.setHours(0, 0, 0, 0);
+                const periodEnd = new Date(periodStart);
+                periodEnd.setDate(periodEnd.getDate() + 13);
+                periodEnd.setHours(23, 59, 59, 999);
+                const payDate = new Date(periodEnd);
+                payDate.setDate(payDate.getDate() + 4);
+
+                await prisma.payPeriod.create({
+                  data: {
+                    driverId: driver.id,
+                    companyId: driver.companyId,
+                    periodStart,
+                    periodEnd,
+                    payDate,
+                    status: 'DRAFT',
+                    basePay: payCalc.ordinaryPay || payCalc.grossPay,
+                    grossEarnings: payCalc.grossPay,
+                    paygTax: payCalc.paygTax || 0,
+                    superAmount: payCalc.superContribution || 0,
+                    totalDeductions: payCalc.paygTax || 0,
+                    netPay: payCalc.netPay || payCalc.grossPay
+                  }
+                }).catch(() => null);
+              }
             }
           }
         } catch (paySyncErr) {
@@ -2982,9 +3045,10 @@ exports.clockOut = async (req, res, next) => {
     }
 
     return sendSuccess(res, {
-      message: 'Clocked Out successfully',
+      message: 'Clocked Out successfully! Shift ended.',
       status: 'Clocked Out',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      shiftSummary: shiftSummaryData
     });
   } catch (error) {
     next(error);
@@ -3127,22 +3191,9 @@ exports.getPayrollData = async (req, res, next) => {
       if (dStop && (!destination || destination === '')) destination = dStop.address || dStop.name || '';
     }
 
-    // Payroll records from DB only
+    // Payroll records from DB
     let payRecords = [];
     if (dbPayPeriods && dbPayPeriods.length > 0) {
-      dbPayPeriods.forEach(p => {
-        if (p.grossEarnings > 0 && (p.netPay < p.grossEarnings || p.totalDeductions > 0)) {
-          p.netPay = p.grossEarnings;
-          p.paygTax = 0;
-          p.superAmount = 0;
-          p.totalDeductions = 0;
-          prisma.payPeriod.update({
-            where: { id: p.id },
-            data: { netPay: p.grossEarnings, paygTax: 0, superAmount: 0, totalDeductions: 0 }
-          }).catch(() => null);
-        }
-      });
-
       payRecords = dbPayPeriods.map((p, idx) => {
         let status = 'Paid';
         let statusColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
@@ -3161,7 +3212,7 @@ exports.getPayrollData = async (req, res, next) => {
         const endStr = new Date(p.periodEnd).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const payDateStr = p.payDate ? `Paid on ${new Date(p.payDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : `Pay Date: ${endStr}`;
 
-        const recNetPay = p.netPay || p.grossEarnings || 0;
+        const recNetPay = p.netPay || Math.max(0, (p.grossEarnings || 0) - (p.paygTax || 0));
 
         return {
           id: p.id,
@@ -3170,11 +3221,13 @@ exports.getPayrollData = async (req, res, next) => {
           netPay: `$${(recNetPay || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           status,
           statusColor,
-          amount: recNetPay || 0
+          amount: recNetPay || 0,
+          gross: p.grossEarnings || 0,
+          tax: p.paygTax || 0,
+          super: p.superAmount || 0
         };
       });
     }
-    // No DB records = empty array (no hardcoded fallback)
 
     const driverName = `${driver.firstName || ''} ${driver.lastName || ''}`.trim() || driver.user?.name || '';
     const bankName = driver.bankName || '';
@@ -3183,7 +3236,7 @@ exports.getPayrollData = async (req, res, next) => {
 
     // Compute real YTD from payRecords
     const totalNetPaid = payRecords.filter(r => r.status === 'Paid').reduce((s, r) => s + (r.amount || 0), 0);
-    const totalGrossEarnings = totalNetPaid; // Use actual when DriverPayRate/allowance records are available
+    const totalGrossEarnings = payRecords.reduce((s, r) => s + (r.gross || r.amount || 0), 0);
     const pendingPayments = payRecords.filter(r => r.status === 'Processing' || r.status === 'Pending').reduce((s, r) => s + (r.amount || 0), 0);
 
     // Calculate live dynamic pay based on driver profile payType and payRate
@@ -3196,16 +3249,45 @@ exports.getPayrollData = async (req, res, next) => {
     });
 
     const liveGross = livePay?.grossEarnings || 0;
-    const dbGross = latestPeriod ? (latestPeriod.grossEarnings || latestPeriod.netPay || latestPeriod.basePay || 0) : 0;
+    const dbGross = latestPeriod ? (latestPeriod.grossEarnings || latestPeriod.basePay || 0) : 0;
     const effectiveGross = Math.max(dbGross, liveGross);
-    const effectiveNetPay = effectiveGross; // 100% full amount paid, no tax or deductions
+
+    // Authentic ATO PAYG Tax & Superannuation (11.5% SG)
+    let effectiveTax = (latestPeriod?.paygTax || 0) > 0 ? latestPeriod.paygTax : (livePay?.paygTax || 0);
+    if (effectiveTax === 0 && effectiveGross > 0) {
+      const { calculateAtoPaygTax } = require('../utils/driverPayCalculator');
+      effectiveTax = calculateAtoPaygTax({
+        grossWeeklyPay: effectiveGross,
+        taxFreeThreshold: driver.taxFreeThreshold !== false,
+        studyLoanDebt: driver.studyLoanDebt === true,
+        residencyStatus: driver.residencyStatus || 'Australian Resident'
+      });
+    }
+
+    let effectiveSuper = (latestPeriod?.superAmount || 0) > 0 ? latestPeriod.superAmount : (livePay?.superAmount || 0);
+    if (effectiveSuper === 0 && effectiveGross > 0) {
+      const superRate = parseFloat(driver.superPercentage) || 11.5;
+      effectiveSuper = Math.round((effectiveGross * (superRate / 100)) * 100) / 100;
+    }
+
+    const effectiveDed = effectiveTax;
+    const effectiveNetPay = Math.round(Math.max(0, effectiveGross - effectiveTax) * 100) / 100;
 
     if (latestPeriod && effectiveGross > (latestPeriod.grossEarnings || 0)) {
       latestPeriod.grossEarnings = effectiveGross;
-      latestPeriod.netPay = effectiveGross;
+      latestPeriod.paygTax = effectiveTax;
+      latestPeriod.superAmount = effectiveSuper;
+      latestPeriod.totalDeductions = effectiveDed;
+      latestPeriod.netPay = effectiveNetPay;
       prisma.payPeriod.update({
         where: { id: latestPeriod.id },
-        data: { grossEarnings: effectiveGross, netPay: effectiveGross, totalDeductions: 0, paygTax: 0, superAmount: 0 }
+        data: {
+          grossEarnings: effectiveGross,
+          paygTax: effectiveTax,
+          superAmount: effectiveSuper,
+          totalDeductions: effectiveDed,
+          netPay: effectiveNetPay
+        }
       }).catch(() => null);
     }
 
@@ -3215,19 +3297,15 @@ exports.getPayrollData = async (req, res, next) => {
 
     const effectiveBase = (latestPeriod?.basePay || 0) > 0 
       ? latestPeriod.basePay 
-      : (!isPerLoad && !isPerKm ? (livePay?.basePay || 0) : 0);
+      : (!isPerLoad && !isPerKm ? (livePay?.basePay || effectiveGross) : 0);
 
     const effectiveLoadAllow = (latestPeriod?.loadAllowance || 0) > 0 
       ? latestPeriod.loadAllowance 
-      : (isPerLoad ? (livePay?.loadAllowance || 0) : (livePay?.loadAllowance || 0));
+      : (isPerLoad ? (livePay?.loadAllowance || effectiveGross) : (livePay?.loadAllowance || 0));
 
     const effectiveDistAllow = (latestPeriod?.distanceAllow || 0) > 0 
       ? latestPeriod.distanceAllow 
-      : (isPerKm ? (livePay?.distanceAllow || 0) : (livePay?.distanceAllow || 0));
-
-    const effectiveTax = 0;
-    const effectiveSuper = 0;
-    const effectiveDed = 0;
+      : (isPerKm ? (livePay?.distanceAllow || effectiveGross) : (livePay?.distanceAllow || 0));
 
     // If dbPayPeriods was empty, create a synthetic pay record for payHistory
     if (payRecords.length === 0 && effectiveGross > 0) {
@@ -3238,10 +3316,13 @@ exports.getPayrollData = async (req, res, next) => {
         id: 'active-period-1',
         period: `${startStr} – ${endStr}`,
         payDate: `Pay Date: ${endStr}`,
-        netPay: `$${effectiveGross.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        netPay: `$${effectiveNetPay.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
         status: 'Pending',
         statusColor: 'bg-amber-50 text-amber-700 border-amber-200',
-        amount: effectiveGross
+        amount: effectiveNetPay,
+        gross: effectiveGross,
+        tax: effectiveTax,
+        super: effectiveSuper
       }];
     }
 
@@ -3267,7 +3348,9 @@ exports.getPayrollData = async (req, res, next) => {
         netPay: fmtMoney(effectiveNetPay),
         grossEarnings: fmtMoney(effectiveGross),
         totalDeductions: fmtMoney(effectiveDed),
+        paygTax: fmtMoney(effectiveTax),
         superannuation: fmtMoney(effectiveSuper),
+        employerSuper: fmtMoney(effectiveSuper),
         payFrequency: latestPeriod?.frequency || 'Fortnightly',
         nextPayment: {
           date: latestPeriod?.payDate ? new Date(latestPeriod.payDate).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'Next Scheduled Pay Cycle',
@@ -3295,17 +3378,17 @@ exports.getPayrollData = async (req, res, next) => {
           totalEarnings: fmtMoney(effectiveGross)
         },
         deductions: {
-          paygTax: '$0.00',
+          paygTax: fmtMoney(effectiveTax),
           superannuation: '$0.00',
           unionFees: '$0.00',
           otherDeductions: '$0.00',
-          totalDeductions: '$0.00'
+          totalDeductions: fmtMoney(effectiveDed)
         },
         employerContributions: {
-          superannuationGuarantee: '$0.00'
+          superannuationGuarantee: fmtMoney(effectiveSuper)
         },
         estimatedNetPay: fmtMoney(effectiveNetPay),
-        paySummaryTotalDeductions: '$0.00'
+        paySummaryTotalDeductions: fmtMoney(effectiveDed)
       },
       payHistory: payRecords,
       totalSummary: {

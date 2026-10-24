@@ -77,7 +77,7 @@ function calculateAtoPaygTax({ grossWeeklyPay = 0, taxFreeThreshold = true, stud
  * @param {number} [params.overtimeStartsAfter=7.6]
  * @param {number} [params.overtimeRate]
  * @param {number} [params.overtimeMultiplier=1.5]
- * @param {number} [params.superPercentage=12.0]
+ * @param {number} [params.superPercentage=11.5]
  * @param {boolean} [params.taxFreeThreshold=true]
  * @param {boolean} [params.studyLoanDebt=false]
  * @param {string} [params.residencyStatus='Australian Resident']
@@ -90,7 +90,7 @@ function calculateHourlyDriverPay({
   overtimeStartsAfter = 7.6,
   overtimeRate = null,
   overtimeMultiplier = 1.5,
-  superPercentage = 12.0,
+  superPercentage = 11.5,
   taxFreeThreshold = true,
   studyLoanDebt = false,
   residencyStatus = 'Australian Resident'
@@ -113,7 +113,7 @@ function calculateHourlyDriverPay({
   const overtimePay = overtimeHours * effectiveOtRate;
   const grossPay = Math.round((ordinaryPay + overtimePay) * 100) / 100;
 
-  const superRate = parseFloat(superPercentage) || 12.0;
+  const superRate = parseFloat(superPercentage) || 11.5;
   const superContribution = Math.round((ordinaryPay * (superRate / 100)) * 100) / 100;
 
   const paygTax = calculateAtoPaygTax({
@@ -390,7 +390,7 @@ function calculateDriverPayForLoad({ driver, load = null, distanceKm = 0, hoursW
   }
 
   if (superContribution === undefined && driver) {
-    const superRate = parseFloat(driver.superPercentage) || 12.0;
+    const superRate = parseFloat(driver.superPercentage) || 11.5;
     superContribution = Math.round((grossPay * (superRate / 100)) * 100) / 100;
   }
   

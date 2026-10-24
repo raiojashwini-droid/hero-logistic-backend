@@ -216,6 +216,22 @@ exports.create = async (req, res, next) => {
     const emergencyNum = payload.EmergencyContactNumber || payload.emergencyContactPhone || '';
     const emergencyCombined = payload.emergencyContact || (emergencyName ? `${emergencyName} ${emergencyNum}`.trim() : emergencyNum) || null;
 
+    let managerIdVal = payload.managerId || null;
+    const repTo = payload.ReportsTo || payload.reportsTo;
+    if (!managerIdVal && repTo && repTo !== '—') {
+      const foundMgr = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: repTo },
+            { name: { equals: repTo } },
+            { email: { equals: repTo } }
+          ],
+          companyId: effectiveCompanyId
+        }
+      }).catch(() => null);
+      if (foundMgr) managerIdVal = foundMgr.id;
+    }
+
     const driverData = {
       firstName: payload.firstName || payload.FirstName || null,
       lastName: payload.lastName || payload.LastName || null,
@@ -243,6 +259,7 @@ exports.create = async (req, res, next) => {
       postalCode: payload.postalCode || payload.PostalCode || null,
       companyId: effectiveCompanyId,
       branchId: branchIdVal,
+      managerId: managerIdVal,
       // 5. Payroll Information
       payType: payload.payType || payload.PayType || 'Hourly',
       payRate: (payload.payRate || payload.PayRate) ? parseFloat(payload.payRate || payload.PayRate) : null,
@@ -283,7 +300,7 @@ exports.create = async (req, res, next) => {
     }
 
     if (payload.employmentType || payload.EmploymentType) {
-      const e = String(payload.employmentType || payload.EmploymentType).toUpperCase().replace(/\s+/g, '_');
+      const e = String(payload.employmentType || payload.EmploymentType).toUpperCase().replace(/[\s-]+/g, '_');
       if (['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR'].includes(e)) {
         driverData.employmentType = e;
       }
@@ -418,7 +435,7 @@ const sanitizeDriverPayload = async (rawPayload, companyId) => {
     if (!rawE) {
       data.employmentType = null;
     } else {
-      const e = rawE.toUpperCase().replace(/\s+/g, '_');
+      const e = rawE.toUpperCase().replace(/[\s-]+/g, '_');
       if (['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR'].includes(e)) {
         data.employmentType = e;
       } else {
@@ -488,6 +505,25 @@ const sanitizeDriverPayload = async (rawPayload, companyId) => {
         }).catch(() => null);
         if (createdBranch) data.branchId = createdBranch.id;
       }
+    }
+  }
+
+  if (rawPayload.managerId !== undefined || rawPayload.reportsTo !== undefined || rawPayload.ReportsTo !== undefined) {
+    const repTo = rawPayload.managerId !== undefined ? rawPayload.managerId : (rawPayload.reportsTo || rawPayload.ReportsTo);
+    if (!repTo || repTo === '—') {
+      data.managerId = null;
+    } else {
+      const foundMgr = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: repTo },
+            { name: { equals: repTo } },
+            { email: { equals: repTo } }
+          ],
+          companyId
+        }
+      }).catch(() => null);
+      data.managerId = foundMgr ? foundMgr.id : repTo;
     }
   }
 

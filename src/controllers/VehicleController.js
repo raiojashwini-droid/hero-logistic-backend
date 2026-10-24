@@ -240,6 +240,24 @@ const sanitizePayload = (rawPayload) => {
     }
   });
 
+  if (rawPayload.regExpiryDate !== undefined) {
+    if (rawPayload.regExpiryDate) {
+      const expD = new Date(rawPayload.regExpiryDate);
+      clean.regExpiryDate = !isNaN(expD.getTime()) ? expD : null;
+    } else {
+      clean.regExpiryDate = null;
+    }
+  }
+
+  if (rawPayload.regIssueDate !== undefined) {
+    if (rawPayload.regIssueDate) {
+      const issD = new Date(rawPayload.regIssueDate);
+      clean.regIssueDate = !isNaN(issD.getTime()) ? issD : null;
+    } else {
+      clean.regIssueDate = null;
+    }
+  }
+
   if (rawPayload.dgCertified !== undefined) clean.dgCertified = Boolean(rawPayload.dgCertified);
   if (rawPayload.hvCertified !== undefined) clean.hvCertified = Boolean(rawPayload.hvCertified);
 
@@ -417,6 +435,14 @@ exports.create = async (req, res, next) => {
     if (rawPayload.engineNumber) vehicleData.engineNumber = String(rawPayload.engineNumber);
     if (rawPayload.regState) vehicleData.regState = String(rawPayload.regState);
     if (rawPayload.regType) vehicleData.regType = String(rawPayload.regType);
+    if (rawPayload.regExpiryDate) {
+      const expD = new Date(rawPayload.regExpiryDate);
+      if (!isNaN(expD.getTime())) vehicleData.regExpiryDate = expD;
+    }
+    if (rawPayload.regIssueDate) {
+      const issD = new Date(rawPayload.regIssueDate);
+      if (!isNaN(issD.getTime())) vehicleData.regIssueDate = issD;
+    }
     if (customDepotText || rawPayload.primaryMechanic) {
       vehicleData.primaryMechanic = String(customDepotText || rawPayload.primaryMechanic);
     }

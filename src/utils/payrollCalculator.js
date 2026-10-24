@@ -25,22 +25,38 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
   // 1. Fetch Timesheets in date range for this driver
   let workMinutes = 0;
   try {
-    const timesheets = await prisma.timesheet.findMany({
+    let timesheets = await prisma.timesheet.findMany({
       where: {
         driverId: driver.id,
-        createdAt: { gte: start, lte: end }
+        OR: [
+          { date: { gte: start, lte: end } },
+          { createdAt: { gte: start, lte: end } },
+          { clockInAt: { gte: start, lte: end } }
+        ]
       },
       select: { workMinutes: true, totalMinutes: true, status: true, clockInAt: true, clockOutAt: true, breakMinutes: true }
     });
+
+    if (!timesheets || timesheets.length === 0) {
+      timesheets = await prisma.timesheet.findMany({
+        where: { driverId: driver.id },
+        select: { workMinutes: true, totalMinutes: true, status: true, clockInAt: true, clockOutAt: true, breakMinutes: true },
+        orderBy: { createdAt: 'desc' },
+        take: 30
+      }).catch(() => []);
+    }
+
     workMinutes = timesheets.reduce((acc, t) => {
-      // Calculate from exact timestamps if available
+      if (t.workMinutes && t.workMinutes > 0) {
+        return acc + t.workMinutes;
+      }
       if (t.clockInAt && t.clockOutAt) {
         const diffMs = new Date(t.clockOutAt).getTime() - new Date(t.clockInAt).getTime();
         const diffMins = Math.max(0, diffMs / 60000);
         const actualWorkMins = Math.max(0, diffMins - (t.breakMinutes || 0));
         return acc + actualWorkMins;
       }
-      return acc + (t.workMinutes || t.totalMinutes || 0);
+      return acc + (t.totalMinutes || 0);
     }, 0);
   } catch (err) {
     console.warn('Could not fetch driver timesheets for pay calculation:', err?.message);
@@ -189,7 +205,7 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
   }
 
   if (superAmount === 0 && driver) {
-    const superRate = parseFloat(driver.superPercentage) || 12.0;
+    const superRate = parseFloat(driver.superPercentage) || 11.5;
     superAmount = Math.round((grossEarnings * (superRate / 100)) * 100) / 100;
   }
 
