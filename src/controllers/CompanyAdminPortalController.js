@@ -1022,11 +1022,11 @@ exports.autoCreditDriverPayroll = async (loadId, driverId, companyId = null, cus
     // 5. Update Earnings & Recalculate according to Driver PayType
     const pType = (driver.payType || '').toLowerCase();
     const isKm = pType.includes('km') || pType.includes('kilometre');
-    const isHourly = pType.includes('hour');
+    const isHourlyRate = pType.includes('hour');
 
-    const newLoadAllowance = isKm || isHourly ? (payPeriod.loadAllowance || 0) : tripCredit;
+    const newLoadAllowance = isKm || isHourlyRate ? (payPeriod.loadAllowance || 0) : tripCredit;
     const newDistanceAllow = isKm ? tripCredit : (payPeriod.distanceAllow || 0);
-    const newBasePay = isHourly ? (payPeriod.basePay || 0) : tripCredit;
+    const newBasePay = isHourlyRate ? (payPeriod.basePay || 0) : tripCredit;
     const otherAllowance = payPeriod.otherAllowance || 0;
     const bonuses = payPeriod.bonuses || 0;
 
