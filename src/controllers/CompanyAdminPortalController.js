@@ -480,12 +480,12 @@ exports.updateLoad = async (req, res, next) => {
       payload.notes = `${baseNotes} [AGREED_RATE:${parseFloat(agreedRate)}]`.trim();
     }
 
-    // Remove empty/invalid relation IDs to prevent foreign key errors
-    if (!payload.customerId) delete payload.customerId;
-    if (!payload.driverId) delete payload.driverId;
-    if (!payload.truckId) delete payload.truckId;
-    if (!payload.trailerId) delete payload.trailerId;
-    if (!payload.branchId) delete payload.branchId;
+    // Handle relation IDs - allow setting to null when explicitly unassigned
+    if ('customerId' in payload) payload.customerId = payload.customerId && payload.customerId.length > 5 ? payload.customerId : null;
+    if ('driverId' in payload) payload.driverId = payload.driverId && payload.driverId.length > 5 ? payload.driverId : null;
+    if ('truckId' in payload) payload.truckId = payload.truckId && payload.truckId.length > 5 ? payload.truckId : null;
+    if ('trailerId' in payload) payload.trailerId = payload.trailerId && payload.trailerId.length > 5 ? payload.trailerId : null;
+    if ('branchId' in payload) payload.branchId = payload.branchId && payload.branchId.length > 5 ? payload.branchId : null;
 
     // Auto-calculate or update DRIVER_PAY tag in notes
     const effectiveDriverId = payload.driverId || targetLoad.driverId;
@@ -548,6 +548,7 @@ exports.updateLoad = async (req, res, next) => {
           color: item.colour || item.color || null,
           quantity: item.quantity ? parseInt(String(item.quantity).replace(/[^0-9]/g, ''), 10) || 1 : 1,
           weightKg: item.weightValue || (item.weight ? parseInt(String(item.weight).replace(/[^0-9]/g, ''), 10) || 0 : 0),
+          customerId: item.customerId && item.customerId.length > 5 ? item.customerId : (item.customer && item.customer.length > 5 ? item.customer : null),
           notes: typeof item.notes === 'string' ? item.notes : (item.details || JSON.stringify(item))
         }))
       };
@@ -1022,11 +1023,11 @@ exports.autoCreditDriverPayroll = async (loadId, driverId, companyId = null, cus
     // 5. Update Earnings & Recalculate according to Driver PayType
     const pType = (driver.payType || '').toLowerCase();
     const isKm = pType.includes('km') || pType.includes('kilometre');
-    const isHourly = pType.includes('hour');
+    const isHourlyRate = pType.includes('hour');
 
-    const newLoadAllowance = isKm || isHourly ? (payPeriod.loadAllowance || 0) : tripCredit;
+    const newLoadAllowance = isKm || isHourlyRate ? (payPeriod.loadAllowance || 0) : tripCredit;
     const newDistanceAllow = isKm ? tripCredit : (payPeriod.distanceAllow || 0);
-    const newBasePay = isHourly ? (payPeriod.basePay || 0) : tripCredit;
+    const newBasePay = isHourlyRate ? (payPeriod.basePay || 0) : tripCredit;
     const otherAllowance = payPeriod.otherAllowance || 0;
     const bonuses = payPeriod.bonuses || 0;
 
