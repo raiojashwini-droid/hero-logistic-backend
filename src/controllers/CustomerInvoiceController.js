@@ -88,6 +88,28 @@ exports.create = async (req, res, next) => {
       }
     }
 
+    // Sanitize payload for Prisma schema
+    if (payload.amount !== undefined) {
+      payload.amount = parseFloat(payload.amount) || 0;
+    }
+    if (payload.dueDate) {
+      const d = new Date(payload.dueDate);
+      payload.dueDate = isNaN(d.getTime()) ? null : d;
+    } else {
+      payload.dueDate = null;
+    }
+    if (payload.status) {
+      const s = String(payload.status).toUpperCase();
+      if (s === 'PENDING') payload.status = 'SENT';
+      else if (['DRAFT', 'SENT', 'PAID', 'OVERDUE'].includes(s)) payload.status = s;
+      else payload.status = 'SENT';
+    } else {
+      payload.status = 'SENT';
+    }
+    if (!payload.loadId || typeof payload.loadId !== 'string' || payload.loadId.trim() === '') {
+      delete payload.loadId;
+    }
+
     const data = await prisma.customerInvoice.create({
       data: payload,
       include: { customer: true, load: true }
@@ -114,6 +136,28 @@ exports.update = async (req, res, next) => {
         code: ERROR_CODES.NOT_FOUND,
         message: 'CustomerInvoice not found'
       }, HTTP_STATUS.NOT_FOUND);
+    }
+
+    // Sanitize update data
+    if (updateData.amount !== undefined) {
+      updateData.amount = parseFloat(updateData.amount) || 0;
+    }
+    if (updateData.dueDate !== undefined) {
+      if (updateData.dueDate) {
+        const d = new Date(updateData.dueDate);
+        updateData.dueDate = isNaN(d.getTime()) ? null : d;
+      } else {
+        updateData.dueDate = null;
+      }
+    }
+    if (updateData.status) {
+      const s = String(updateData.status).toUpperCase();
+      if (s === 'PENDING') updateData.status = 'SENT';
+      else if (['DRAFT', 'SENT', 'PAID', 'OVERDUE'].includes(s)) updateData.status = s;
+      else updateData.status = 'SENT';
+    }
+    if (updateData.loadId !== undefined && (!updateData.loadId || updateData.loadId.trim() === '')) {
+      delete updateData.loadId;
     }
 
     const data = await prisma.customerInvoice.update({
