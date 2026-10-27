@@ -319,10 +319,10 @@ exports.create = async (req, res, next) => {
       }
     }
 
-    let metaNotes = payload.notes || '';
-    if (agreedRate) metaNotes += ` [AGREED_RATE:${agreedRate}]`;
-    if (agreedDriverPay) metaNotes += ` [DRIVER_PAY:${agreedDriverPay}]`;
-    if (metaNotes.trim()) payload.notes = metaNotes.trim();
+    // Sanitize user notes: NEVER append internal system tags like [DRIVER_PAY:...]
+    if (payload.notes) {
+      payload.notes = String(payload.notes).replace(/\[(AGREED_RATE|DRIVER_PAY|SCHEDULE|PAYROLL_CREDITED):[^\]]+\]/g, '').trim();
+    }
 
     delete payload.pickupLocation;
     delete payload.deliveryLocation;

@@ -374,6 +374,8 @@ function calculateDriverPayForLoad({ driver, load = null, distanceKm = 0, hoursW
       overtimeMultiplier: driver.overtimeMultiplier,
       superPercentage: driver.superPercentage
     });
+    result.status = hrs > 0 ? (hoursWorked > 0 ? 'APPROVED' : 'ESTIMATED') : 'PENDING_HOURS';
+    result.payRate = driverRate;
   }
 
   const grossPay = result.grossPay || 0;

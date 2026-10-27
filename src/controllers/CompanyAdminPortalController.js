@@ -20,7 +20,7 @@ async function resolveRequiredCompanyId(req) {
 /**
  * Helper to find existing load by ID or loadRef, or auto-create if not present
  */
-async function resolveOrCreateLoad(id, req) {
+async function resolveOrCreateLoad(id, req, allowCreate = true) {
   if (!id) throw new Error('Load ID or reference is required');
   const tenantWhere = getTenantWhere(req);
   let target = await prisma.load.findFirst({
@@ -31,6 +31,26 @@ async function resolveOrCreateLoad(id, req) {
   });
 
   if (!target) {
+    // Fallback: check if the load exists globally (e.g. created with null companyId or slight mismatch)
+    target = await prisma.load.findFirst({
+      where: {
+        OR: [{ id }, { loadRef: id }]
+      }
+    });
+
+    if (target && !target.companyId) {
+      const companyId = resolveCompanyId(req);
+      if (companyId) {
+        await prisma.load.update({ where: { id: target.id }, data: { companyId } }).catch(() => null);
+        target.companyId = companyId;
+      }
+    }
+  }
+
+  if (!target) {
+    if (!allowCreate) {
+      return null;
+    }
     const companyId = resolveCompanyId(req);
     if (!companyId) throw new Error('Company context is required to create a load.');
     const isValidUuid = typeof id === 'string' && id.length === 36 && id.includes('-');
@@ -162,7 +182,8 @@ exports.getLoads = async (req, res, next) => {
       let uiStatus = item.status;
       if (item.status === 'IN_TRANSIT') uiStatus = 'ACTIVE';
       if (item.status === 'DELIVERED') uiStatus = 'COMPLETED';
-      return { ...item, status: uiStatus };
+      const cleanNotes = (item.notes || '').replace(/\[(AGREED_RATE|DRIVER_PAY|SCHEDULE|PAYROLL_CREDITED):[^\]]+\]/g, '').trim();
+      return { ...item, status: uiStatus, notes: cleanNotes };
     });
 
     const meta = buildPaginationMeta(total, currentPage, pageSize, req.query.sort);
@@ -261,15 +282,17 @@ exports.createLoad = async (req, res, next) => {
     // Extract and preserve financial metadata
     const agreedRate = payload.rate || payload.price || payload.revenue || payload.customerRate || null;
     let agreedDriverPay = payload.driverPay || payload.driverRate || null;
+    let assignedDriver = null;
 
-    if (payload.driverId && !agreedDriverPay) {
+    if (payload.driverId) {
       try {
-        const { calculateDriverPayForLoad } = require('../utils/driverPayCalculator');
-        const assignedDriver = await prisma.driver.findUnique({ where: { id: payload.driverId } });
-        if (assignedDriver) {
-          const calc = calculateDriverPayForLoad({ driver: assignedDriver, load: payload });
-          if (calc && calc.grossPay > 0) {
-            agreedDriverPay = calc.grossPay;
+        assignedDriver = await prisma.driver.findUnique({ where: { id: payload.driverId } });
+        if (assignedDriver && !agreedDriverPay) {
+          const rawType = (assignedDriver.payType || '').toLowerCase();
+          if (!rawType.includes('hour')) {
+            const { calculateDriverPayForLoad } = require('../utils/driverPayCalculator');
+            const calc = calculateDriverPayForLoad({ driver: assignedDriver, load: payload });
+            if (calc && calc.grossPay > 0) agreedDriverPay = calc.grossPay;
           }
         }
       } catch (calcErr) {
@@ -277,10 +300,10 @@ exports.createLoad = async (req, res, next) => {
       }
     }
 
-    let metaNotes = payload.notes || '';
-    if (agreedRate) metaNotes += ` [AGREED_RATE:${agreedRate}]`;
-    if (agreedDriverPay) metaNotes += ` [DRIVER_PAY:${agreedDriverPay}]`;
-    if (metaNotes.trim()) payload.notes = metaNotes.trim();
+    // Sanitize user notes: NEVER append internal system tags like [DRIVER_PAY:...] or [SCHEDULE:...]
+    if (payload.notes) {
+      payload.notes = String(payload.notes).replace(/\[(AGREED_RATE|DRIVER_PAY|SCHEDULE|PAYROLL_CREDITED):[^\]]+\]/g, '').trim();
+    }
 
     // Clean non-schema parameters
     delete payload.customerName;
@@ -394,6 +417,30 @@ exports.createLoad = async (req, res, next) => {
       }
     }
 
+    // Attach structured driverPayConfig into pricingSnapshot cleanly
+    if (assignedDriver || payload.driverId) {
+      let snap = payload.pricingSnapshot || {};
+      if (typeof snap === 'string') {
+        try { snap = JSON.parse(snap); } catch (e) { snap = {}; }
+      }
+      const rawPayType = String(assignedDriver?.payType || 'Hourly').trim();
+      const isHourly = rawPayType.toLowerCase().includes('hour') || rawPayType.toLowerCase().includes('/hr');
+      const driverRate = parseFloat(assignedDriver?.payRate) || parseFloat(agreedDriverPay) || 0;
+
+      snap.driverPayConfig = {
+        ...(snap.driverPayConfig || {}),
+        driverId: payload.driverId || null,
+        payType: isHourly ? 'HOURLY' : 'FLAT',
+        rate: driverRate,
+        unit: isHourly ? '/hour' : 'flat',
+        status: isHourly ? 'PENDING_HOURS' : 'SET',
+        estimatedHours: 0,
+        approvedHours: 0,
+        totalPay: isHourly ? 0 : driverRate
+      };
+      payload.pricingSnapshot = snap;
+    }
+
     const cleanedData = cleanLoadPayload(payload);
 
     const data = await prisma.load.create({
@@ -421,7 +468,10 @@ exports.createLoad = async (req, res, next) => {
 exports.updateLoad = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const targetLoad = await resolveOrCreateLoad(id, req);
+    const targetLoad = await resolveOrCreateLoad(id, req, false);
+    if (!targetLoad) {
+      return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: `Load ${id} not found` }, HTTP_STATUS.NOT_FOUND);
+    }
 
     const payload = { ...req.body };
     if (payload.status) payload.status = sanitizeLoadStatus(payload.status);
@@ -505,11 +555,38 @@ exports.updateLoad = async (req, res, next) => {
       } catch (e) {}
     }
 
-    if (computedDriverPay !== null && computedDriverPay > 0) {
-      const baseNotes = (payload.notes || targetLoad.notes || '')
-        .replace(/\[DRIVER_PAY:[^\]]+\]/g, '')
+    // Sanitize notes - NEVER append internal system tags like [DRIVER_PAY:...]
+    if (payload.notes || targetLoad.notes) {
+      payload.notes = String(payload.notes || targetLoad.notes)
+        .replace(/\[(AGREED_RATE|DRIVER_PAY|SCHEDULE|PAYROLL_CREDITED):[^\]]+\]/g, '')
         .trim();
-      payload.notes = `${baseNotes} [DRIVER_PAY:${computedDriverPay}]`.trim();
+    }
+
+    // Maintain driverPayConfig in pricingSnapshot
+    if (effectiveDriverId) {
+      try {
+        const assignedDriver = await prisma.driver.findUnique({ where: { id: effectiveDriverId } });
+        if (assignedDriver) {
+          let snap = payload.pricingSnapshot || targetLoad.pricingSnapshot || {};
+          if (typeof snap === 'string') {
+            try { snap = JSON.parse(snap); } catch (e) { snap = {}; }
+          }
+          const rawPayType = String(assignedDriver.payType || 'Hourly').trim();
+          const isHourly = rawPayType.toLowerCase().includes('hour') || rawPayType.toLowerCase().includes('/hr');
+          const driverRate = parseFloat(assignedDriver.payRate) || parseFloat(newDriverPay) || 0;
+
+          snap.driverPayConfig = {
+            ...(snap.driverPayConfig || {}),
+            driverId: effectiveDriverId,
+            payType: isHourly ? 'HOURLY' : 'FLAT',
+            rate: driverRate,
+            unit: isHourly ? '/hour' : 'flat',
+            status: isHourly ? 'PENDING_HOURS' : 'SET',
+            totalPay: isHourly ? 0 : driverRate
+          };
+          payload.pricingSnapshot = snap;
+        }
+      } catch (e) {}
     }
 
     // Handle nested relation updates for stops
@@ -4896,7 +4973,97 @@ exports.getLoadById = async (req, res, next) => {
     if (load.status === 'IN_TRANSIT') uiStatus = 'ACTIVE';
     if (load.status === 'DELIVERED') uiStatus = 'COMPLETED';
 
-    return sendSuccess(res, { ...load, status: uiStatus });
+    // Sanitize notes so internal tags are NEVER exposed in load notes
+    const cleanNotes = (load.notes || '').replace(/\[(AGREED_RATE|DRIVER_PAY|SCHEDULE|PAYROLL_CREDITED):[^\]]+\]/g, '').trim();
+
+    // Compute detailed driver pay info with multi-load shift allocation
+    let driverPayInfo = null;
+    if (load.driver) {
+      const rawPayType = String(load.driver.payType || 'Hourly').trim().toLowerCase();
+      const isHourly = rawPayType.includes('hour') || rawPayType.includes('/hr');
+      const driverRate = parseFloat(load.driver.payRate) || 0;
+
+      if (isHourly) {
+        let approvedHours = 0;
+        let shiftLoadsCount = 1;
+        let totalShiftHours = 0;
+
+        const loadDate = load.loadDate || load.createdAt;
+        if (loadDate && prisma.timesheet) {
+          const dayStart = new Date(loadDate);
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date(loadDate);
+          dayEnd.setHours(23, 59, 59, 999);
+
+          const ts = await prisma.timesheet.findFirst({
+            where: {
+              driverId: load.driver.id,
+              date: { gte: dayStart, lte: dayEnd },
+              status: { in: ['APPROVED', 'COMPLETED', 'Approved'] }
+            }
+          }).catch(() => null);
+
+          if (ts) {
+            totalShiftHours = parseFloat(ts.workMinutes ? ts.workMinutes / 60 : (ts.totalMinutes ? ts.totalMinutes / 60 : 0)) || 0;
+            if (totalShiftHours > 0) {
+              const otherLoads = await prisma.load.count({
+                where: {
+                  driverId: load.driver.id,
+                  loadDate: { gte: dayStart, lte: dayEnd },
+                  status: { in: ['DELIVERED', 'COMPLETED', 'ACTIVE', 'IN_TRANSIT'] }
+                }
+              }).catch(() => 1);
+
+              shiftLoadsCount = Math.max(1, otherLoads);
+              // Allocate shift hours across loads in this shift to prevent duplicate counting
+              approvedHours = Math.round((totalShiftHours / shiftLoadsCount) * 100) / 100;
+            }
+          }
+        }
+
+        let estimatedHours = 0;
+        if (load.stops && load.stops.length >= 2) {
+          const first = load.stops[0];
+          const last = load.stops[load.stops.length - 1];
+          if (first.scheduledDate && last.scheduledDate) {
+            const diff = (new Date(last.scheduledDate) - new Date(first.scheduledDate)) / (1000 * 60 * 60);
+            if (diff > 0 && diff < 48) estimatedHours = Math.round(diff * 10) / 10;
+          }
+        }
+        if (estimatedHours <= 0 && load.estimatedTransitHours) {
+          estimatedHours = parseFloat(load.estimatedTransitHours) || 0;
+        }
+
+        const isApproved = approvedHours > 0;
+        const isEstimated = !isApproved && estimatedHours > 0;
+        const totalDriverPay = isApproved ? Math.round(approvedHours * driverRate * 100) / 100 : (isEstimated ? Math.round(estimatedHours * driverRate * 100) / 100 : 0);
+
+        driverPayInfo = {
+          payType: 'HOURLY',
+          payRate: driverRate,
+          unit: '/hour',
+          status: isApproved ? 'APPROVED' : (isEstimated ? 'ESTIMATED' : 'PENDING_HOURS'),
+          approvedHours,
+          estimatedHours,
+          shiftLoadsCount,
+          totalShiftHours,
+          totalDriverPay,
+          formattedTotal: totalDriverPay > 0 ? `$${totalDriverPay.toFixed(2)}` : 'Pending hours'
+        };
+      } else {
+        const flatRate = parseFloat(load.driverPay) || driverRate;
+        driverPayInfo = {
+          payType: rawPayType.includes('km') ? 'PER_KM' : 'FLAT',
+          payRate: flatRate,
+          unit: rawPayType.includes('km') ? '/km' : 'flat',
+          status: 'SET',
+          totalDriverPay: flatRate,
+          formattedTotal: `$${flatRate.toFixed(2)}`
+        };
+      }
+    }
+
+    return sendSuccess(res, { ...load, notes: cleanNotes, driverPayInfo, status: uiStatus });
   } catch (error) { next(error); }
 };
 
