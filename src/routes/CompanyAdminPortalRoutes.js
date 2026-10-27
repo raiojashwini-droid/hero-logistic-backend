@@ -33,6 +33,8 @@ router.get('/loads/:id/documents', ctrl.getLoadDocuments);
 router.post('/loads/:id/documents', ctrl.createLoadDocument);
 router.put('/loads/:id', ctrl.updateLoad);
 router.delete('/loads/:id', ctrl.deleteLoad);
+router.delete('/loads/:id/items/:itemId', ctrl.deleteLoadItem);
+router.put('/loads/:id/items/:itemId/resolve', ctrl.resolveLoadItemIssue);
 
 // 3. Live Tracking
 router.get('/live-tracking', ctrl.getLiveTracking);

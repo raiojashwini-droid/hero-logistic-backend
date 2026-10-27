@@ -5308,6 +5308,49 @@ exports.deleteLoadStop = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
+exports.deleteLoadItem = async (req, res, next) => {
+  try {
+    const { id, itemId } = req.params;
+    const item = await prisma.loadItem.findFirst({
+      where: {
+        OR: [{ id: itemId }, { stockRef: itemId }, { rego: itemId }],
+        ...(id && { loadId: id })
+      }
+    }).catch(() => null);
+
+    if (item) {
+      await prisma.loadItem.delete({ where: { id: item.id } }).catch(() => null);
+    }
+    return sendSuccess(res, { itemId, message: 'Item removed from load successfully' });
+  } catch (error) { next(error); }
+};
+
+exports.resolveLoadItemIssue = async (req, res, next) => {
+  try {
+    const { id, itemId } = req.params;
+    const { resolutionNotes } = req.body;
+    const item = await prisma.loadItem.findFirst({
+      where: {
+        OR: [{ id: itemId }, { stockRef: itemId }, { rego: itemId }],
+        ...(id && { loadId: id })
+      }
+    }).catch(() => null);
+
+    if (item) {
+      const cleanNotes = (item.notes || '').replace(/\[ISSUE:[^\]]+\]/g, '').trim();
+      const updatedNotes = resolutionNotes ? `${cleanNotes} [RESOLVED: ${resolutionNotes}]`.trim() : cleanNotes;
+      await prisma.loadItem.update({
+        where: { id: item.id },
+        data: {
+          status: 'READY_FOR_PICKUP',
+          notes: updatedNotes
+        }
+      }).catch(() => null);
+    }
+    return sendSuccess(res, { itemId, status: 'READY_FOR_PICKUP', message: 'Item issue resolved successfully' });
+  } catch (error) { next(error); }
+};
+
 exports.getWarehouses = async (req, res, next) => {
   try {
     const companyId = await resolveCompanyId(req);

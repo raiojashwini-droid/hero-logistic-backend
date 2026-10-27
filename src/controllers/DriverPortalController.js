@@ -1307,7 +1307,7 @@ exports.updatePickupItemStatus = async (req, res, next) => {
   try {
     const driver = await resolveDriver(req);
     if (!driver) return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
-    const { itemId, pickedUp } = req.body;
+    const { itemId, pickedUp, isFlagged, reason, notes } = req.body;
 
     let updatedItem = null;
     if (prisma.loadItem && itemId) {
@@ -1316,20 +1316,33 @@ exports.updatePickupItemStatus = async (req, res, next) => {
         where: { id: targetId }
       }).catch(() => null);
 
+      let targetStatus = pickedUp ? 'PICKED_UP' : 'PENDING';
+      let updatedNotes = undefined;
+
+      if (isFlagged) {
+        targetStatus = 'ISSUE_REPORTED';
+        const baseNotes = (loadItem?.notes || '').replace(/\[ISSUE:[^\]]+\]/g, '').trim();
+        updatedNotes = `${baseNotes} [ISSUE: ${reason || 'Damaged / Compromised Item'}${notes ? ` - ${notes}` : ''}]`.trim();
+      }
+
       if (loadItem) {
         updatedItem = await prisma.loadItem.update({
           where: { id: targetId },
-          data: { status: pickedUp ? 'PICKED_UP' : 'PENDING' }
+          data: {
+            status: targetStatus,
+            ...(updatedNotes !== undefined && { notes: updatedNotes })
+          }
         }).catch(() => null);
       } else {
         // Fallback gracefully for virtual/auto-provisioned items (e.g. 'c1', 'c2')
         updatedItem = {
           id: targetId,
-          status: pickedUp ? 'PICKED_UP' : 'PENDING'
+          status: targetStatus,
+          notes: updatedNotes
         };
       }
     } else {
-      updatedItem = { id: itemId || 'c1', status: pickedUp ? 'PICKED_UP' : 'PENDING' };
+      updatedItem = { id: itemId || 'c1', status: isFlagged ? 'ISSUE_REPORTED' : (pickedUp ? 'PICKED_UP' : 'PENDING') };
     }
 
     return sendSuccess(res, { success: true, item: updatedItem });
