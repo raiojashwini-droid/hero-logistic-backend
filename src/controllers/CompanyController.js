@@ -441,10 +441,21 @@ exports.update = async (req, res, next) => {
 async function cascadeDeleteCompany(companyId) {
   if (!companyId) return;
 
-  // 1. Delete Load children & loads
+  // 0. Detach / Nullify circular references & relations to avoid constraint deadlocks
+  await prisma.vehicle?.updateMany({ where: { companyId }, data: { currentDriverId: null, branchId: null } }).catch(() => {});
+  await prisma.driver?.updateMany({ where: { companyId }, data: { branchId: null, warehouseId: null, managerId: null, userId: null } }).catch(() => {});
+  await prisma.customer?.updateMany({ where: { companyId }, data: { branchId: null, accountManagerId: null } }).catch(() => {});
+  await prisma.warehouse?.updateMany({ where: { companyId }, data: { branchId: null, managerId: null } }).catch(() => {});
+  await prisma.user?.updateMany({ where: { companyId }, data: { branchId: null, customRoleId: null } }).catch(() => {});
+
+  // If any SUPER_ADMIN has this companyId, dissociate them so they aren't deleted and don't block company deletion
+  await prisma.user?.updateMany({ where: { companyId, role: 'SUPER_ADMIN' }, data: { companyId: null, branchId: null, customRoleId: null } }).catch(() => {});
+
+  // 1. Delete Load dependencies & Loads
   const loads = await prisma.load.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
   const loadIds = loads.map(l => l.id);
   if (loadIds.length > 0) {
+    await prisma.message?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
     await prisma.loadItem?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
     await prisma.routeStop?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
     await prisma.loadExpense?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
@@ -455,13 +466,80 @@ async function cascadeDeleteCompany(companyId) {
     await prisma.customerInvoice?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
     await prisma.itemMovement?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
     await prisma.document?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
+    await prisma.driverIncident?.deleteMany({ where: { loadId: { in: loadIds } } }).catch(() => {});
     await prisma.load?.deleteMany({ where: { id: { in: loadIds } } }).catch(() => {});
   }
+  await prisma.load?.deleteMany({ where: { companyId } }).catch(() => {});
 
-  // 2. Delete Driver children & drivers
+  // 2. Delete Customer dependencies & Customers
+  const customers = await prisma.customer.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const customerIds = customers.map(c => c.id);
+  if (customerIds.length > 0) {
+    await prisma.customerPricingProfile?.deleteMany({ where: { customerId: { in: customerIds } } }).catch(() => {});
+    await prisma.customerBillingRule?.deleteMany({ where: { customerId: { in: customerIds } } }).catch(() => {});
+    await prisma.customerInvoice?.deleteMany({ where: { customerId: { in: customerIds } } }).catch(() => {});
+    await prisma.loadItem?.deleteMany({ where: { customerId: { in: customerIds } } }).catch(() => {});
+    await prisma.customer?.deleteMany({ where: { id: { in: customerIds } } }).catch(() => {});
+  }
+  await prisma.customer?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 3. Delete Assets & Asset dependencies across company branches & warehouses
+  const branches = await prisma.branch.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const branchIds = branches.map(b => b.id);
+  const warehouses = await prisma.warehouse.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const warehouseIds = warehouses.map(w => w.id);
+
+  const assets = await prisma.asset.findMany({
+    where: {
+      OR: [
+        ...(branchIds.length > 0 ? [{ branchId: { in: branchIds } }] : []),
+        ...(warehouseIds.length > 0 ? [{ warehouseId: { in: warehouseIds } }] : [])
+      ]
+    },
+    select: { id: true }
+  }).catch(() => []);
+  const assetIds = assets.map(a => a.id);
+  if (assetIds.length > 0) {
+    await prisma.assetAssignment?.deleteMany({ where: { assetId: { in: assetIds } } }).catch(() => {});
+    await prisma.assetMaintenance?.deleteMany({ where: { assetId: { in: assetIds } } }).catch(() => {});
+    await prisma.document?.deleteMany({ where: { assetId: { in: assetIds } } }).catch(() => {});
+    await prisma.asset?.deleteMany({ where: { id: { in: assetIds } } }).catch(() => {});
+  }
+
+  // 4. Delete Warehouse children & Warehouses
+  if (warehouseIds.length > 0) {
+    await prisma.stagingArea?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.loadLane?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.itemMovement?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.inboundReceipt?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.networkedPrinter?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.warehouseLabelPrint?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.printSpoolerJob?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.document?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.yardTask?.deleteMany({ where: { warehouseId: { in: warehouseIds } } }).catch(() => {});
+    await prisma.warehouse?.deleteMany({ where: { id: { in: warehouseIds } } }).catch(() => {});
+  }
+  await prisma.warehouse?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 5. Delete Vehicle dependencies & Vehicles
+  const vehicles = await prisma.vehicle.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const vehicleIds = vehicles.map(v => v.id);
+  if (vehicleIds.length > 0) {
+    await prisma.telemetryLog?.deleteMany({ where: { vehicleId: { in: vehicleIds } } }).catch(() => {});
+    await prisma.equipmentSwap?.deleteMany({ where: { OR: [{ prevTrailerId: { in: vehicleIds } }, { newTrailerId: { in: vehicleIds } }] } }).catch(() => {});
+    await prisma.document?.deleteMany({ where: { vehicleId: { in: vehicleIds } } }).catch(() => {});
+    await prisma.loadExpense?.deleteMany({ where: { vehicleId: { in: vehicleIds } } }).catch(() => {});
+    await prisma.vehicle?.deleteMany({ where: { id: { in: vehicleIds } } }).catch(() => {});
+  }
+  await prisma.vehicle?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 6. Delete Driver dependencies & Drivers
   const drivers = await prisma.driver.findMany({ where: { companyId }, select: { id: true, userId: true } }).catch(() => []);
   const driverIds = drivers.map(d => d.id);
   if (driverIds.length > 0) {
+    await prisma.driverSuperInfo?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
+    await prisma.telemetryLog?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
+    await prisma.notification?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
     await prisma.payPeriod?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
     await prisma.timesheet?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
     await prisma.preStartChecklist?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
@@ -479,31 +557,48 @@ async function cascadeDeleteCompany(companyId) {
     await prisma.vinScanEvent?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
     await prisma.shift?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
     await prisma.document?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
+    await prisma.yardTask?.deleteMany({ where: { driverId: { in: driverIds } } }).catch(() => {});
     await prisma.driver?.deleteMany({ where: { id: { in: driverIds } } }).catch(() => {});
   }
+  await prisma.driver?.deleteMany({ where: { companyId } }).catch(() => {});
 
-  // 3. Vehicles
-  await prisma.vehicle?.deleteMany({ where: { companyId } }).catch(() => {});
-
-  // 4. Warehouse & Yard
-  await prisma.stagingArea?.deleteMany({ where: { warehouse: { companyId } } }).catch(() => {});
-  await prisma.loadLane?.deleteMany({ where: { warehouse: { companyId } } }).catch(() => {});
-  await prisma.itemMovement?.deleteMany({ where: { warehouse: { companyId } } }).catch(() => {});
-  await prisma.warehouse?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.yardTask?.deleteMany({ where: { companyId } }).catch(() => {});
-
-  // 5. Branches, Customers, Finance & Configs
-  await prisma.customerInvoice?.deleteMany({ where: { customer: { companyId } } }).catch(() => {});
-  await prisma.customer?.deleteMany({ where: { companyId } }).catch(() => {});
+  // 7. Delete Branches
+  if (branchIds.length > 0) {
+    await prisma.branch?.deleteMany({ where: { id: { in: branchIds } } }).catch(() => {});
+  }
   await prisma.branch?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.billingRecord?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.tenantSubscription?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 8. Delete Support Tickets & replies
+  const tickets = await prisma.supportTicket.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const ticketIds = tickets.map(t => t.id);
+  if (ticketIds.length > 0) {
+    await prisma.ticketReply?.deleteMany({ where: { ticketId: { in: ticketIds } } }).catch(() => {});
+    await prisma.supportTicket?.deleteMany({ where: { id: { in: ticketIds } } }).catch(() => {});
+  }
   await prisma.supportTicket?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.auditLog?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.whiteLabelConfig?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.companyIntegration?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.companyFeatureOverride?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 9. Delete Conversations, Participants & Messages
+  const conversations = await prisma.conversation.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const conversationIds = conversations.map(c => c.id);
+  if (conversationIds.length > 0) {
+    await prisma.conversationParticipant?.deleteMany({ where: { conversationId: { in: conversationIds } } }).catch(() => {});
+    await prisma.message?.deleteMany({ where: { conversationId: { in: conversationIds } } }).catch(() => {});
+    await prisma.conversation?.deleteMany({ where: { id: { in: conversationIds } } }).catch(() => {});
+  }
+  await prisma.conversation?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 10. Delete Custom Roles & Permissions
+  const roles = await prisma.customRole.findMany({ where: { companyId }, select: { id: true } }).catch(() => []);
+  const roleIds = roles.map(r => r.id);
+  if (roleIds.length > 0) {
+    await prisma.customPermission?.deleteMany({ where: { roleId: { in: roleIds } } }).catch(() => {});
+    await prisma.customRole?.deleteMany({ where: { id: { in: roleIds } } }).catch(() => {});
+  }
   await prisma.customRole?.deleteMany({ where: { companyId } }).catch(() => {});
+
+  // 11. Delete all other Company-scoped entities
+  await prisma.assetTransfer?.deleteMany({ where: { OR: [{ senderCompanyId: companyId }, { receiverCompanyId: companyId }] } }).catch(() => {});
+  await prisma.yardTask?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.loadExpense?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.payPeriod?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.timesheet?.deleteMany({ where: { companyId } }).catch(() => {});
@@ -512,16 +607,28 @@ async function cascadeDeleteCompany(companyId) {
   await prisma.driverMessage?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.driverIncident?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.offlineSyncItem?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.shift?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.lanePricingRule?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.vehicleTypeRate?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.fuelSurchargeLog?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.workflowRule?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.notificationRule?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.aiActivityLog?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.aiModelRegistry?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.notificationTemplate?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.shift?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.notificationRule?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.onboardingHandover?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.recipientGroup?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.billingRecord?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.tenantSubscription?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.whiteLabelConfig?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.companyIntegration?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.companyFeatureOverride?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.companyStorageAudit?.deleteMany({ where: { companyId } }).catch(() => {});
   await prisma.report?.deleteMany({ where: { companyId } }).catch(() => {});
-  await prisma.conversation?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.auditLog?.deleteMany({ where: { companyId } }).catch(() => {});
 
-  // 6. Users belonging to this company (keep SUPER_ADMIN safe)
+  // 12. Delete Company Users (preserve SUPER_ADMIN by nullifying companyId)
+  await prisma.user?.updateMany({ where: { companyId, role: 'SUPER_ADMIN' }, data: { companyId: null, branchId: null, customRoleId: null } }).catch(() => {});
   const users = await prisma.user.findMany({ where: { companyId, role: { not: 'SUPER_ADMIN' } }, select: { id: true } }).catch(() => []);
   const userIds = users.map(u => u.id);
   if (userIds.length > 0) {
@@ -534,8 +641,12 @@ async function cascadeDeleteCompany(companyId) {
     await prisma.shift?.deleteMany({ where: { userId: { in: userIds } } }).catch(() => {});
     await prisma.user?.deleteMany({ where: { id: { in: userIds } } }).catch(() => {});
   }
+  // Clear any logs tied directly to companyId
+  await prisma.userSession?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.apiUsageLog?.deleteMany({ where: { companyId } }).catch(() => {});
+  await prisma.moduleUsageLog?.deleteMany({ where: { companyId } }).catch(() => {});
 
-  // 7. Delete the company record
+  // 13. Finally, Delete the company record
   await prisma.company.delete({ where: { id: companyId } });
 }
 

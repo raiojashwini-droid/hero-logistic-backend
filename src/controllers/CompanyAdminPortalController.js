@@ -2921,9 +2921,11 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
       if (existing) {
         if (gross > 0) {
           existing.grossEarnings = gross;
-          existing.netPay = gross;
-          existing.loadAllowance = gross;
-          existing.basePay = gross;
+          existing.netPay = calc?.netPay || gross;
+          existing.paygTax = calc?.paygTax || 0;
+          existing.superAmount = calc?.superAmount || 0;
+          existing.loadAllowance = calc?.loadAllowance || gross;
+          existing.basePay = calc?.basePay || 0;
         }
         liveBreakdowns.push(existing);
       } else if (gross > 0) {
@@ -2940,15 +2942,15 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
           },
           periodStart,
           periodEnd,
-          basePay: gross,
-          loadAllowance: gross,
-          distanceAllow: 0,
-          otherAllowance: 0,
-          bonuses: 0,
+          basePay: calc?.basePay || gross,
+          loadAllowance: calc?.loadAllowance || gross,
+          distanceAllow: calc?.distanceAllow || 0,
+          otherAllowance: calc?.otherAllowance || 0,
+          bonuses: calc?.bonuses || 0,
           grossEarnings: gross,
-          paygTax: 0,
-          superAmount: 0,
-          netPay: gross,
+          paygTax: calc?.paygTax || 0,
+          superAmount: calc?.superAmount || 0,
+          netPay: calc?.netPay || gross,
           status: 'DRAFT'
         });
       }

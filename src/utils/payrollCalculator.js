@@ -192,9 +192,10 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
   }
   let grossEarnings = Math.round((basePay + overtimePay + loadAllowance + distanceAllow + otherAllowance + bonuses) * 100) / 100;
 
-  // If no real data, gross stays at 0
-  // No dummy fallback - return actual computed value only
-  
+  // Ordinary Time Earnings (OTE) eligible for statutory Super Guarantee (ATO SGR 2009/2)
+  // Overtime pay and non-OTE expense reimbursements are excluded from Super calculations.
+  const eligibleOteEarnings = Math.max(0, Math.round((basePay + loadAllowance + distanceAllow + bonuses) * 100) / 100);
+
   if (paygTax === 0 && driver) {
     paygTax = calculateAtoPaygTax({
       grossWeeklyPay: grossEarnings,
@@ -204,9 +205,9 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     });
   }
 
+  const superRate = parseFloat(driver?.superPercentage) || 11.5;
   if (superAmount === 0 && driver) {
-    const superRate = parseFloat(driver.superPercentage) || 11.5;
-    superAmount = Math.round((grossEarnings * (superRate / 100)) * 100) / 100;
+    superAmount = Math.round((eligibleOteEarnings * (superRate / 100)) * 100) / 100;
   }
 
   const totalDeductions = paygTax;
@@ -227,8 +228,10 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     distanceAllow,
     otherAllowance,
     bonuses,
+    eligibleOteEarnings,
     grossEarnings,
     paygTax,
+    superPercentage: superRate,
     superAmount,
     employerSuperContribution: superAmount,
     totalDeductions,
@@ -238,6 +241,7 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
       overtimePay: `$${overtimePay.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       loadAllowance: `$${loadAllowance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       distanceAllowance: `$${distanceAllow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      eligibleOteEarnings: `$${eligibleOteEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       grossEarnings: `$${grossEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       paygTax: `$${paygTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       superAmount: `$${superAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
