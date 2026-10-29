@@ -217,10 +217,10 @@ router.get('/subscription-billing/plans', ctrl.getAvailableSubscriptionPlans);
 router.get('/subscription-billing/invoices', ctrl.getSubscriptionInvoices);
 router.put('/subscription-billing/plan', ctrl.updateSubscriptionPlan);
 
-// Utility: one-time cleanup of wrongly-defaulted driver fields
-router.get('/cleanup-driver-defaults', ctrl.cleanupDriverDefaults);
-
 // Consolidated Invoicing
 router.post('/billing/consolidate', ctrl.generateConsolidatedInvoices);
+
+// Warehouse Inventory
+router.use('/warehouse-inventory', require('./WarehouseInventoryRoutes'));
 
 module.exports = router;

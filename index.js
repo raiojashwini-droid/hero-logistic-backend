@@ -41,8 +41,11 @@ const { analyticsLogger } = require('./src/middleware/analyticsLogger');
 
 // Base API routes
 app.use(analyticsLogger);
+app.use('/api/v1/warehouse-inventory', require('./src/routes/WarehouseInventoryRoutes'));
+app.use('/api/warehouse-inventory', require('./src/routes/WarehouseInventoryRoutes'));
 app.use('/api/v1', apiRoutes);
 app.use('/api', apiRoutes);
+
 
 // Health check endpoint
 app.get('/', (req, res) => {
