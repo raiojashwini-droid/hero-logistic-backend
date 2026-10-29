@@ -333,9 +333,9 @@ class PricingService {
       }
 
       let newStatus = 'NOT_READY';
-      if (isReady) {
+      if (isReady || isDelivered) {
         newStatus = 'READY_TO_INVOICE';
-      } else if (isDelivered && blockedReason) {
+      } else if (blockedReason) {
         newStatus = 'BILLING_BLOCKED';
       }
 

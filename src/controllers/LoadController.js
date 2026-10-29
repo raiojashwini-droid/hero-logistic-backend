@@ -365,7 +365,17 @@ exports.create = async (req, res, next) => {
       ? payload.billedCustomerIds.filter(id => id && typeof id === 'string' && id.length > 5)
       : [];
     delete payload.billedCustomerIds;
-    delete payload.billingSnapshots;
+
+    if (payload.billingSnapshots) {
+      const existingSnap = payload.pricingSnapshot && typeof payload.pricingSnapshot === 'object' && !Array.isArray(payload.pricingSnapshot)
+        ? payload.pricingSnapshot
+        : {};
+      payload.pricingSnapshot = {
+        ...existingSnap,
+        billingSnapshots: payload.billingSnapshots
+      };
+      delete payload.billingSnapshots;
+    }
 
     const cleanedPayload = cleanLoadPayload(payload);
 
@@ -538,7 +548,16 @@ exports.update = async (req, res, next) => {
       ? updateData.billedCustomerIds.filter(id => id && typeof id === 'string' && id.length > 5)
       : null;
     delete updateData.billedCustomerIds;
-    delete updateData.billingSnapshots;
+    if (updateData.billingSnapshots) {
+      const existingSnap = updateData.pricingSnapshot && typeof updateData.pricingSnapshot === 'object' && !Array.isArray(updateData.pricingSnapshot)
+        ? updateData.pricingSnapshot
+        : (targetLoad.pricingSnapshot && typeof targetLoad.pricingSnapshot === 'object' && !Array.isArray(targetLoad.pricingSnapshot) ? targetLoad.pricingSnapshot : {});
+      updateData.pricingSnapshot = {
+        ...existingSnap,
+        billingSnapshots: updateData.billingSnapshots
+      };
+      delete updateData.billingSnapshots;
+    }
 
     const cleanedData = cleanLoadPayload(updateData);
 

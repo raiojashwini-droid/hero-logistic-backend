@@ -216,20 +216,25 @@ exports.create = async (req, res, next) => {
     const emergencyNum = payload.EmergencyContactNumber || payload.emergencyContactPhone || '';
     const emergencyCombined = payload.emergencyContact || (emergencyName ? `${emergencyName} ${emergencyNum}`.trim() : emergencyNum) || null;
 
-    let managerIdVal = payload.managerId || null;
-    const repTo = payload.ReportsTo || payload.reportsTo;
-    if (!managerIdVal && repTo && repTo !== '—') {
+    let managerIdVal = null;
+    const rawMgr = payload.managerId || payload.ReportsTo || payload.reportsTo;
+    if (rawMgr && rawMgr !== '—' && rawMgr !== 'None' && rawMgr !== 'null') {
       const foundMgr = await prisma.user.findFirst({
         where: {
           OR: [
-            { id: repTo },
-            { name: { equals: repTo } },
-            { email: { equals: repTo } }
+            { id: rawMgr },
+            { name: { equals: rawMgr, mode: 'insensitive' } },
+            { email: { equals: rawMgr, mode: 'insensitive' } }
           ],
-          companyId: effectiveCompanyId
+          ...(effectiveCompanyId ? { companyId: effectiveCompanyId } : {})
         }
       }).catch(() => null);
-      if (foundMgr) managerIdVal = foundMgr.id;
+      if (foundMgr) {
+        managerIdVal = foundMgr.id;
+      } else {
+        const anyUser = await prisma.user.findUnique({ where: { id: rawMgr } }).catch(() => null);
+        managerIdVal = anyUser ? anyUser.id : null;
+      }
     }
 
     const driverData = {
@@ -510,20 +515,25 @@ const sanitizeDriverPayload = async (rawPayload, companyId) => {
 
   if (rawPayload.managerId !== undefined || rawPayload.reportsTo !== undefined || rawPayload.ReportsTo !== undefined) {
     const repTo = rawPayload.managerId !== undefined ? rawPayload.managerId : (rawPayload.reportsTo || rawPayload.ReportsTo);
-    if (!repTo || repTo === '—') {
+    if (!repTo || repTo === '—' || repTo === 'None' || repTo === 'null') {
       data.managerId = null;
     } else {
       const foundMgr = await prisma.user.findFirst({
         where: {
           OR: [
             { id: repTo },
-            { name: { equals: repTo } },
-            { email: { equals: repTo } }
+            { name: { equals: repTo, mode: 'insensitive' } },
+            { email: { equals: repTo, mode: 'insensitive' } }
           ],
-          companyId
+          ...(companyId ? { companyId } : {})
         }
       }).catch(() => null);
-      data.managerId = foundMgr ? foundMgr.id : repTo;
+      if (foundMgr) {
+        data.managerId = foundMgr.id;
+      } else {
+        const anyUser = await prisma.user.findUnique({ where: { id: repTo } }).catch(() => null);
+        data.managerId = anyUser ? anyUser.id : null;
+      }
     }
   }
 
