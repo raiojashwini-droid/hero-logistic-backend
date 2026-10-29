@@ -6,10 +6,19 @@ const { sendError } = require('../utils/apiResponse');
  * Verifies JWT from HttpOnly cookie or Authorization Bearer header
  */
 exports.verifyToken = async (req, res, next) => {
-  let token = req.cookies?.accessToken;
-  
-  if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-    token = req.headers.authorization.split(' ')[1];
+  let token = null;
+
+  // 1. Explicit Authorization Bearer header takes top precedence (SPA active session)
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    const candidate = req.headers.authorization.split(' ')[1];
+    if (candidate && candidate.trim() && candidate !== 'null' && candidate !== 'undefined') {
+      token = candidate.trim();
+    }
+  }
+
+  // 2. Fallback to HttpOnly cookie only if Authorization header is not provided
+  if (!token && req.cookies?.accessToken) {
+    token = req.cookies.accessToken;
   }
 
   if (!token) {

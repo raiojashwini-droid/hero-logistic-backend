@@ -164,11 +164,104 @@ exports.cleanLoadPayload = cleanLoadPayload;
 
 // 2. LOADS MENU (All Loads & Load Inbox)
 // ----------------------------------------------------------------------
+exports.getLoadDraft = async (req, res, next) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const userId = req.user?.id || 'default_user';
+    if (!companyId) {
+      return sendSuccess(res, null);
+    }
+    const draftRecord = await prisma.load.findFirst({
+      where: {
+        companyId,
+        draftId: `AUTOSAVE_${userId}`,
+        status: 'DRAFT'
+      }
+    });
+    if (!draftRecord || !draftRecord.notes) {
+      return sendSuccess(res, null);
+    }
+    let draftData = null;
+    try {
+      draftData = JSON.parse(draftRecord.notes);
+    } catch (e) {
+      draftData = null;
+    }
+    return sendSuccess(res, {
+      draftData,
+      updatedAt: draftRecord.updatedAt,
+      id: draftRecord.id
+    });
+  } catch (error) { next(error); }
+};
+
+exports.saveLoadDraft = async (req, res, next) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const userId = req.user?.id || 'default_user';
+    if (!companyId) {
+      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required' }, HTTP_STATUS.FORBIDDEN);
+    }
+    const draftPayload = req.body || {};
+    const notesJson = JSON.stringify(draftPayload);
+    const draftIdKey = `AUTOSAVE_${userId}`;
+
+    const existing = await prisma.load.findFirst({
+      where: { companyId, draftId: draftIdKey }
+    });
+
+    let record;
+    if (existing) {
+      record = await prisma.load.update({
+        where: { id: existing.id },
+        data: {
+          notes: notesJson,
+          type: draftPayload.formData?.loadType || existing.type || 'General Freight',
+          updatedAt: new Date()
+        }
+      });
+    } else {
+      const crypto = require('crypto');
+      record = await prisma.load.create({
+        data: {
+          id: crypto.randomUUID(),
+          loadRef: `AUTOSAVE-${companyId.slice(0, 6)}-${userId.slice(0, 8)}`,
+          draftId: draftIdKey,
+          type: draftPayload.formData?.loadType || 'General Freight',
+          status: 'DRAFT',
+          companyId,
+          notes: notesJson
+        }
+      });
+    }
+
+    return sendSuccess(res, { success: true, updatedAt: record.updatedAt, id: record.id });
+  } catch (error) { next(error); }
+};
+
+exports.deleteLoadDraft = async (req, res, next) => {
+  try {
+    const companyId = resolveCompanyId(req);
+    const userId = req.user?.id || 'default_user';
+    if (companyId) {
+      await prisma.load.deleteMany({
+        where: { companyId, draftId: `AUTOSAVE_${userId}` }
+      });
+    }
+    return sendSuccess(res, { message: 'Draft cleared successfully' });
+  } catch (error) { next(error); }
+};
+
 exports.getLoads = async (req, res, next) => {
   try {
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
     const tenantWhere = getTenantWhere(req);
     Object.assign(where, tenantWhere);
+
+    where.NOT = [
+      ...(Array.isArray(where.NOT) ? where.NOT : (where.NOT ? [where.NOT] : [])),
+      { draftId: { startsWith: 'AUTOSAVE_' } }
+    ];
 
     const [data, total] = await Promise.all([
       prisma.load.findMany({
@@ -205,14 +298,26 @@ exports.createLoad = async (req, res, next) => {
     delete payload.id;
     delete payload.rawId;
 
-    // Guarantee unique loadRef
+    // Guarantee unique loadRef & prevent double-submit duplication
     if (payload.loadRef) {
+      const cleanLoadRef = String(payload.loadRef).trim();
       const existingRef = await prisma.load.findFirst({
-        where: { loadRef: String(payload.loadRef) }
+        where: {
+          loadRef: cleanLoadRef,
+          ...(companyId && { companyId })
+        }
       });
       if (existingRef) {
-        payload.loadRef = `${payload.loadRef}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const ageMs = Date.now() - new Date(existingRef.createdAt).getTime();
+        if (ageMs < 15000) {
+          return sendSuccess(res, existingRef, HTTP_STATUS.OK);
+        }
+        return sendError(res, {
+          code: ERROR_CODES.VALIDATION_ERROR,
+          message: `A load with reference '${cleanLoadRef}' already exists in your workspace.`
+        }, HTTP_STATUS.BAD_REQUEST);
       }
+      payload.loadRef = cleanLoadRef;
     } else {
       payload.loadRef = `PO-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
     }
@@ -473,6 +578,12 @@ exports.createLoad = async (req, res, next) => {
       try {
         await exports.autoCreditDriverPayroll(data.id, data.driverId, data.companyId);
       } catch (e) {}
+    }
+
+    if (companyId && req.user?.id) {
+      prisma.load.deleteMany({
+        where: { companyId, draftId: `AUTOSAVE_${req.user.id}` }
+      }).catch(() => {});
     }
 
     return sendSuccess(res, data, HTTP_STATUS.CREATED);

@@ -507,6 +507,12 @@ exports.provision = async (req, res, next) => {
 
     let adminUser = await prisma.user.findUnique({ where: { email: resolvedAdminEmail } });
     if (adminUser) {
+      if (adminUser.companyId && adminUser.companyId !== targetCompany.id) {
+        return sendError(res, {
+          code: ERROR_CODES.VALIDATION_ERROR,
+          message: `Workspace manager email '${resolvedAdminEmail}' is already assigned to another company.`
+        }, HTTP_STATUS.BAD_REQUEST);
+      }
       adminUser = await prisma.user.update({
         where: { id: adminUser.id },
         data: {

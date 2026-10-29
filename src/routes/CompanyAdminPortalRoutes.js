@@ -17,6 +17,9 @@ router.get('/dashboard', ctrl.getCommandCentre);
 
 // 2. Loads
 router.get('/loads', ctrl.getLoads);
+router.get('/loads/draft', ctrl.getLoadDraft);
+router.post('/loads/draft', ctrl.saveLoadDraft);
+router.delete('/loads/draft', ctrl.deleteLoadDraft);
 router.post('/loads', ctrl.createLoad);
 router.get('/loads/:id', ctrl.getLoadById);
 router.get('/loads/:id/stops', ctrl.getLoadStops);

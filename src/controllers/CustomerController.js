@@ -208,7 +208,30 @@ exports.create = async (req, res, next) => {
       payload.companyId = raw.companyId || companyId;
     }
 
-    payload.name = raw.name || raw.companyName || 'New Customer';
+    const trimmedName = (raw.name || raw.companyName || 'New Customer').trim();
+    payload.name = trimmedName;
+
+    // Duplicate prevention & idempotency check
+    if (payload.companyId) {
+      const existingCustomer = await prisma.customer.findFirst({
+        where: {
+          companyId: payload.companyId,
+          name: trimmedName
+        }
+      });
+      if (existingCustomer) {
+        const ageMs = Date.now() - new Date(existingCustomer.createdAt).getTime();
+        // If created within the last 15 seconds, return existing record (idempotent duplicate request)
+        if (ageMs < 15000) {
+          return sendSuccess(res, existingCustomer, HTTP_STATUS.OK);
+        }
+        return sendError(res, {
+          code: ERROR_CODES.VALIDATION_ERROR,
+          message: `A customer named '${trimmedName}' already exists in your company.`
+        }, HTTP_STATUS.BAD_REQUEST);
+      }
+    }
+
     if (raw.abn) payload.abn = String(raw.abn);
     if (raw.contactName || raw.primaryContact) payload.contactName = raw.contactName || raw.primaryContact;
     if (raw.email) payload.email = raw.email;

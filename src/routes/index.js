@@ -233,6 +233,8 @@ router.use('/dashboard-metrics', SuperAdminDashboardRoutes);
 // Warehouse Portal
 router.use('/warehouse-portal', WarehousePortalRoutes);
 router.use('/warehouse-inventory', require('./WarehouseInventoryRoutes'));
+router.use('/company-admin/warehouse-inventory', require('./WarehouseInventoryRoutes'));
+
 
 // Accounts Portal
 router.use('/accounts', AccountsPortalRoutes);

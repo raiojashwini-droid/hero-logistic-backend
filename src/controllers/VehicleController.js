@@ -319,17 +319,7 @@ exports.create = async (req, res, next) => {
     const effectiveCompanyId = rawPayload.companyId;
 
     if (!effectiveCompanyId) {
-      try {
-        const fallbackComp = await prisma.company.create({
-          data: {
-            name: 'Hero Logistics Default',
-            tenantId: `TEN-FALLBACK-${Date.now()}`
-          }
-        });
-        effectiveCompanyId = fallbackComp.id;
-      } catch (e) {
-        console.error('Critical fallback company creation error:', e.message);
-      }
+      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required to create vehicles' }, HTTP_STATUS.FORBIDDEN);
     }
 
     let branchIdVal = rawPayload.branchId || rawPayload.branch || null;

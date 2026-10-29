@@ -130,27 +130,7 @@ exports.create = async (req, res, next) => {
     const payload = { ...req.body };
     let effectiveCompanyId = req.tenantId || req.user?.companyId || (req.user?.role === 'SUPER_ADMIN' ? payload.companyId : null);
     if (!effectiveCompanyId) {
-      let defaultComp = await prisma.company.findFirst().catch(() => null);
-      if (!defaultComp) {
-        defaultComp = await prisma.company.create({
-          data: {
-            name: 'Hero Logistics Pty Ltd',
-            tenantId: 'HERO-DEMO-01'
-          }
-        }).catch(() => null);
-      }
-      if (defaultComp) {
-        effectiveCompanyId = defaultComp.id;
-        if (req.user?.id && !req.user.companyId) {
-          await prisma.user.update({
-            where: { id: req.user.id },
-            data: { companyId: defaultComp.id }
-          }).catch(() => null);
-        }
-      }
-    }
-    if (!effectiveCompanyId && req.user?.role !== 'SUPER_ADMIN') {
-      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Company context required' }, HTTP_STATUS.FORBIDDEN);
+      return sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Tenant company context required to create drivers' }, HTTP_STATUS.FORBIDDEN);
     }
     payload.companyId = effectiveCompanyId;
     let branchIdVal = payload.branchId || null;

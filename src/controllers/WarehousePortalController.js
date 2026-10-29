@@ -1054,7 +1054,7 @@ exports.createInboundReceipt = async (req, res, next) => {
                 loadRef: `LD-${receiptNo}`,
                 type: inboundType || 'Inbound Delivery',
                 status: 'PLANNED',
-                companyId: tenantId || (await tx.company.findFirst())?.id || '',
+                companyId: tenantId || req.user?.companyId || '',
                 notes: `Inbound Receipt ${receiptNo}`
               }
             });
@@ -2808,11 +2808,8 @@ async function resolveYardDriver(req, res) {
 
   let companyId = req.tenantId || driver?.companyId || user.companyId;
   if (!companyId) {
-    const primaryCompany = await prisma.company.findFirst({
-      where: { status: 'ACTIVE' },
-      orderBy: { createdAt: 'asc' }
-    });
-    companyId = primaryCompany?.id;
+    sendError(res, { code: ERROR_CODES.UNAUTHORIZED_ACCESS, message: 'Valid company context is required.' }, HTTP_STATUS.FORBIDDEN);
+    return null;
   }
 
   if (!companyId) {
@@ -3542,11 +3539,7 @@ exports.createInboundReceipt = async (req, res, next) => {
       }
       if (!defaultWh) {
         // Auto-create a default warehouse for the tenant
-        let targetCompanyId = tenantId;
-        if (!targetCompanyId) {
-          const firstCompany = await prisma.company.findFirst();
-          targetCompanyId = firstCompany?.id;
-        }
+        let targetCompanyId = tenantId || req.user?.companyId;
         if (targetCompanyId) {
           let branch = await prisma.branch.findFirst({ where: { companyId: targetCompanyId } });
           if (!branch) {
@@ -3600,11 +3593,7 @@ exports.createInboundReceipt = async (req, res, next) => {
         let dropoffStopId = dummyStop?.id;
 
         if (!pickupStopId) {
-          let targetCompanyId = tenantId;
-          if (!targetCompanyId) {
-            const firstCompany = await tx.company.findFirst();
-            targetCompanyId = firstCompany?.id;
-          }
+          let targetCompanyId = tenantId || req.user?.companyId;
 
           const dummyLoad = await tx.load.create({
             data: {
@@ -4630,9 +4619,6 @@ exports.submitSafetyChecklist = async (req, res, next) => {
     }
     if (!driver && companyId) {
       driver = await prisma.driver.findFirst({ where: { companyId } });
-    }
-    if (!driver) {
-      driver = await prisma.driver.findFirst();
     }
     if (!driver && companyId) {
       driver = await prisma.driver.create({

@@ -14,21 +14,22 @@ exports.login = async (req, res, next) => {
     const { user, accessToken, refreshToken } = await AuthService.login(email, password, ipAddress, userAgent);
 
     const isProd = process.env.NODE_ENV === 'production';
-    // Set Cookies (SameSite 'none' + secure required for cross-origin in production)
-    res.cookie('accessToken', accessToken, {
+    const cookieOptions = {
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax',
+      path: '/'
+    };
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
       maxAge: 15 * 60 * 1000 // 15 mins
     });
 
     res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
-
 
     // Remove password from response
     delete user.password;
@@ -46,10 +47,18 @@ exports.logout = async (req, res, next) => {
     
     await AuthService.logout(refreshToken);
 
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
+    const isProd = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      path: '/'
+    };
 
-    return res.status(HTTP_STATUS.NO_CONTENT).send();
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
+
+    return sendSuccess(res, { message: 'Logged out successfully' }, HTTP_STATUS.OK);
   } catch (error) {
     next(error);
   }
@@ -286,6 +295,7 @@ exports.impersonate = async (req, res, next) => {
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax',
+      path: '/',
       maxAge: 15 * 60 * 1000
     });
 
