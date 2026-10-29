@@ -17,7 +17,17 @@ const corsOptions = {
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'bypass-tunnel-reminder', 'x-requested-with', 'Accept']
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'bypass-tunnel-reminder',
+    'x-requested-with',
+    'Accept',
+    'x-company-id',
+    'x-tenant-id',
+    'X-Company-Id',
+    'X-Tenant-Id'
+  ]
 };
 app.use(cors(corsOptions));
 app.options(/.*$/, cors(corsOptions));
