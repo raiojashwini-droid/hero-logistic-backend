@@ -1100,7 +1100,7 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
 exports.syncUncreditedDeliveredLoads = async (companyId = null) => {
   try {
     const where = {
-      status: { in: ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'] },
+      status: { in: ['DELIVERED', 'COMPLETED'] },
       driverId: { not: null }
     };
     if (companyId) {
@@ -1159,8 +1159,20 @@ exports.autoCreditDriverPayroll = async (loadId, driverId, companyId = null, cus
       try {
         if (isHourly) {
           let hours = 0;
-          if (load.departedAt && load.deliveredAt) {
-            hours = Math.max(0.5, (new Date(load.deliveredAt) - new Date(load.departedAt)) / (1000 * 60 * 60));
+          if (load.notes && load.notes.includes('[LOAD_PAID_HOURS:')) {
+            const matchH = load.notes.match(/\[LOAD_PAID_HOURS:([0-9.]+)/);
+            if (matchH && matchH[1]) hours = parseFloat(matchH[1]);
+          } else if (load.notes && load.notes.includes('[LOAD_STARTED_AT:') && load.notes.includes('[LOAD_DELIVERED_AT:')) {
+            const mStart = load.notes.match(/\[LOAD_STARTED_AT:([^\]]+)\]/);
+            const mEnd = load.notes.match(/\[LOAD_DELIVERED_AT:([^\]]+)\]/);
+            if (mStart && mEnd) {
+              const diffMs = Math.max(0, new Date(mEnd[1]) - new Date(mStart[1]));
+              let diffMins = Math.round(diffMs / 60000);
+              let breakMins = 0;
+              const mBreak = load.notes.match(/\[LOAD_BREAK_MINS:([0-9.]+)/);
+              if (mBreak && mBreak[1]) breakMins = parseFloat(mBreak[1]);
+              hours = Math.round(Math.max(0, diffMins - breakMins) / 60 * 100) / 100;
+            }
           } else if (load.estimatedTransitHours) {
             hours = parseFloat(load.estimatedTransitHours);
           } else {
@@ -1214,8 +1226,7 @@ exports.autoCreditDriverPayroll = async (loadId, driverId, companyId = null, cus
       }
     }
     if (!tripCredit || tripCredit === 0) {
-      // Default trip credit for completed loads
-      tripCredit = 500.00;
+      tripCredit = parseFloat(driver.payRate) || 0;
     }
 
     // 4. Resolve Active PayPeriod (or create new DRAFT PayPeriod for driver)
@@ -1261,9 +1272,17 @@ exports.autoCreditDriverPayroll = async (loadId, driverId, companyId = null, cus
     const isKm = pType.includes('km') || pType.includes('kilometre');
     const isHourlyRate = pType.includes('hour');
 
-    const newLoadAllowance = isKm || isHourlyRate ? (payPeriod.loadAllowance || 0) : tripCredit;
-    const newDistanceAllow = isKm ? tripCredit : (payPeriod.distanceAllow || 0);
-    const newBasePay = isHourlyRate ? (payPeriod.basePay || 0) : tripCredit;
+    let newLoadAllowance = payPeriod.loadAllowance || 0;
+    let newDistanceAllow = payPeriod.distanceAllow || 0;
+    let newBasePay = payPeriod.basePay || 0;
+
+    if (isHourlyRate) {
+      newBasePay += tripCredit;
+    } else if (isKm) {
+      newDistanceAllow += tripCredit;
+    } else {
+      newLoadAllowance += tripCredit;
+    }
     const otherAllowance = payPeriod.otherAllowance || 0;
     const bonuses = payPeriod.bonuses || 0;
 
@@ -3084,15 +3103,19 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
       let existing = payPeriods.find(p => p.driverId === d.id);
       if (existing) {
         if (gross > 0) {
+          const isH = (d.payType || '').toLowerCase().includes('hour');
           existing.grossEarnings = gross;
           existing.netPay = calc?.netPay || gross;
           existing.paygTax = calc?.paygTax || 0;
           existing.superAmount = calc?.superAmount || 0;
-          existing.loadAllowance = calc?.loadAllowance || gross;
-          existing.basePay = calc?.basePay || 0;
+          existing.loadAllowance = isH ? 0 : (calc?.loadAllowance || gross);
+          existing.basePay = isH ? gross : (calc?.basePay || 0);
+          existing.hoursWorked = calc?.units?.hoursWorked || 0;
+          existing.payRate = d.payRate || 0;
         }
         liveBreakdowns.push(existing);
       } else if (gross > 0) {
+        const isH = (d.payType || '').toLowerCase().includes('hour');
         liveBreakdowns.push({
           id: `live-${d.id}`,
           driverId: d.id,
@@ -3106,8 +3129,8 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
           },
           periodStart,
           periodEnd,
-          basePay: calc?.basePay || gross,
-          loadAllowance: calc?.loadAllowance || gross,
+          basePay: isH ? gross : (calc?.basePay || 0),
+          loadAllowance: isH ? 0 : (calc?.loadAllowance || gross),
           distanceAllow: calc?.distanceAllow || 0,
           otherAllowance: calc?.otherAllowance || 0,
           bonuses: calc?.bonuses || 0,
@@ -3115,6 +3138,8 @@ exports.getDriverPayBreakdown = async (req, res, next) => {
           paygTax: calc?.paygTax || 0,
           superAmount: calc?.superAmount || 0,
           netPay: calc?.netPay || gross,
+          hoursWorked: calc?.units?.hoursWorked || 0,
+          payRate: d.payRate || 0,
           status: 'DRAFT'
         });
       }

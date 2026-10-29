@@ -61,7 +61,7 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
   } catch (err) {
     console.warn('Could not fetch driver timesheets for pay calculation:', err?.message);
   }
-  const hoursWorked = Math.round((workMinutes / 60) * 100) / 100;
+  let hoursWorked = Math.round((workMinutes / 60) * 100) / 100;
 
   // 2. Fetch Loads in date range for this driver
   let completedLoadsCount = 0;
@@ -91,6 +91,19 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     totalKmDriven = completedLoadsCount * 650;
     if (activeLoadsCount > 0) {
       totalKmDriven += activeLoadsCount * 250;
+    }
+
+    // If timesheets did not record minutes, extract actual recorded paid hours from loads
+    if (workMinutes === 0 && Array.isArray(loads)) {
+      loads.forEach(l => {
+        if (l.notes && typeof l.notes === 'string') {
+          const matchHours = l.notes.match(/\[LOAD_PAID_HOURS:([0-9.]+)\]/);
+          if (matchHours && matchHours[1]) {
+            workMinutes += Math.round(parseFloat(matchHours[1]) * 60);
+          }
+        }
+      });
+      hoursWorked = Math.round((workMinutes / 60) * 100) / 100;
     }
   } catch (err) {
     console.warn('Could not fetch driver loads for pay calculation:', err?.message);
@@ -164,6 +177,7 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
       const calc = calculateHourlyDriverPay({
         hoursWorked,
         hourlyRate: rawRate,
+        applyOvertime: !!(driver.enableOvertime || driver.applyOvertime),
         ordinaryHoursPerDay: driver.ordinaryHoursPerDay,
         overtimeStartsAfter: driver.overtimeStartsAfter,
         overtimeRate: driver.overtimeRate,
@@ -180,10 +194,7 @@ async function calculateDriverPay({ driver, startDate, endDate, companyId }) {
     } else {
       basePay = 0;
     }
-    if (totalLoadAmount > 0) {
-      loadAllowance = totalLoadAmount;
-      if (hoursWorked === 0) basePay = 0;
-    }
+    loadAllowance = 0;
   }
 
   // Compute Totals: Gross Earnings & Net Pay

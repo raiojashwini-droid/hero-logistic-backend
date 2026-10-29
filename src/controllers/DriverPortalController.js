@@ -1533,17 +1533,68 @@ exports.confirmPickupLoad = async (req, res, next) => {
     const driver = await resolveDriver(req);
     if (!driver) return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
     const { loadId } = req.body;
+    const startedAt = new Date();
 
     if (loadId && prisma.load) {
+      const existingLoad = await prisma.load.findUnique({ where: { id: loadId } }).catch(() => null);
+      let updatedNotes = existingLoad?.notes || '';
+      if (!updatedNotes.includes('[LOAD_STARTED_AT:')) {
+        updatedNotes = `${updatedNotes} [LOAD_STARTED_AT:${startedAt.toISOString()}]`.trim();
+      }
       await prisma.load.updateMany({
         where: { id: loadId, driverId: driver.id },
-        data: { status: 'IN_TRANSIT' }
+        data: { status: 'IN_TRANSIT', notes: updatedNotes }
       }).catch(() => null);
+    }
+
+    // Sync active Timesheet clockInAt so load working hours are tracked in real-time
+    if (prisma.timesheet) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let ts = await prisma.timesheet.findFirst({
+        where: { driverId: driver.id, date: today }
+      }).catch(() => null);
+
+      if (!ts) {
+        ts = await prisma.timesheet.create({
+          data: {
+            driverId: driver.id,
+            companyId: driver.companyId,
+            date: today,
+            status: 'DRAFT',
+            clockInAt: startedAt,
+            workMinutes: 0,
+            breakMinutes: 0,
+            totalMinutes: 0
+          }
+        }).catch(() => null);
+      } else if (!ts.clockInAt) {
+        await prisma.timesheet.update({
+          where: { id: ts.id },
+          data: { clockInAt: startedAt }
+        }).catch(() => null);
+      }
+
+      if (ts && prisma.timesheetEvent) {
+        const events = await prisma.timesheetEvent.findMany({ where: { timesheetId: ts.id } }).catch(() => []);
+        if (!events.some(e => e.type === 'CLOCK_IN')) {
+          await prisma.timesheetEvent.create({
+            data: {
+              timesheetId: ts.id,
+              type: 'CLOCK_IN',
+              timestamp: startedAt,
+              locationName: 'Load Pickup Started (Work timer running)',
+              isAutoDetected: true
+            }
+          }).catch(() => null);
+        }
+      }
     }
 
     return sendSuccess(res, {
       success: true,
-      message: 'All vehicles verified! Pickup confirmed. Load status changed to IN_TRANSIT.'
+      startedAt: startedAt.toISOString(),
+      message: 'All vehicles verified! Pickup confirmed. Load status changed to IN_TRANSIT and work timer started.'
     });
   } catch (error) {
     next(error);
@@ -1766,11 +1817,95 @@ exports.confirmDeliveryPOD = async (req, res, next) => {
 
     const signaturePath = signature ? saveBase64Image(signature, 'signatures') : null;
 
+    const deliveredAt = new Date();
+    let calculatedCredit = null;
+    let actualPaidHours = 0;
+    let totalShiftMinutes = 0;
+    let unpaidBreakMinutes = 0;
+
     if (targetLoadId && prisma.load) {
+      const existingLoad = await prisma.load.findUnique({ where: { id: targetLoadId } }).catch(() => null);
+      let startedTime = null;
+
+      if (existingLoad?.notes && existingLoad.notes.includes('[LOAD_STARTED_AT:')) {
+        const match = existingLoad.notes.match(/\[LOAD_STARTED_AT:([^\]]+)\]/);
+        if (match && match[1]) {
+          const parsed = new Date(match[1]);
+          if (!isNaN(parsed.getTime())) startedTime = parsed;
+        }
+      }
+
+      // Fallback start time if not recorded explicitly
+      if (!startedTime) {
+        startedTime = existingLoad?.createdAt ? new Date(existingLoad.createdAt) : new Date(Date.now() - 60 * 60 * 1000);
+      }
+
+      const totalShiftMs = Math.max(0, deliveredAt.getTime() - startedTime.getTime());
+      totalShiftMinutes = Math.max(1, Math.round(totalShiftMs / (1000 * 60)));
+
+      // Calculate any breaks taken from today's timesheet events
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const ts = prisma.timesheet ? await prisma.timesheet.findFirst({
+        where: { driverId: driver.id, date: today },
+        include: { events: { orderBy: { timestamp: 'asc' } } }
+      }).catch(() => null) : null;
+
+      if (ts && ts.events) {
+        let bStart = null;
+        ts.events.forEach(e => {
+          if (e.type === 'BREAK_START') {
+            bStart = new Date(e.timestamp);
+          } else if (e.type === 'BREAK_END' && bStart) {
+            unpaidBreakMinutes += Math.max(0, Math.round((new Date(e.timestamp).getTime() - bStart.getTime()) / (1000 * 60)));
+            bStart = null;
+          }
+        });
+        if (bStart) {
+          unpaidBreakMinutes += Math.max(0, Math.round((deliveredAt.getTime() - bStart.getTime()) / (1000 * 60)));
+        }
+      }
+
+      const netPaidMinutes = Math.max(0, totalShiftMinutes - unpaidBreakMinutes);
+      actualPaidHours = Math.round((netPaidMinutes / 60) * 100) / 100;
+      const hourlyRate = parseFloat(driver.payRate) || 0;
+      calculatedCredit = Math.round(actualPaidHours * hourlyRate * 100) / 100;
+
+      let updatedNotes = existingLoad?.notes || '';
+      if (!updatedNotes.includes('[LOAD_DELIVERED_AT:')) {
+        updatedNotes = `${updatedNotes} [LOAD_DELIVERED_AT:${deliveredAt.toISOString()}] [LOAD_PAID_HOURS:${actualPaidHours}] [LOAD_BREAK_MINS:${unpaidBreakMinutes}] [LOAD_TOTAL_MINS:${totalShiftMinutes}] [DRIVER_PAY:${calculatedCredit}]`.trim();
+      }
+
       await prisma.load.updateMany({
         where: { id: targetLoadId },
-        data: { status: 'DELIVERED', dispatchNotes: notes || undefined }
+        data: { status: 'DELIVERED', dispatchNotes: notes || undefined, notes: updatedNotes }
       }).catch(() => null);
+
+      // Update today's timesheet with actual shift, break, and net work minutes
+      if (ts) {
+        await prisma.timesheet.update({
+          where: { id: ts.id },
+          data: {
+            clockOutAt: deliveredAt,
+            workMinutes: netPaidMinutes,
+            breakMinutes: unpaidBreakMinutes,
+            totalMinutes: totalShiftMinutes
+          }
+        }).catch(() => null);
+
+        // Add CLOCK_OUT event if not present
+        if (ts.events && !ts.events.some(e => e.type === 'CLOCK_OUT') && prisma.timesheetEvent) {
+          await prisma.timesheetEvent.create({
+            data: {
+              timesheetId: ts.id,
+              type: 'CLOCK_OUT',
+              timestamp: deliveredAt,
+              locationName: 'Delivery Completed',
+              isAutoDetected: true
+            }
+          }).catch(() => null);
+        }
+      }
     }
 
     if (driver && targetLoadId && prisma.deliveryPOD) {
@@ -1809,7 +1944,7 @@ exports.confirmDeliveryPOD = async (req, res, next) => {
           autoInvoice = await autoGenerateLoadInvoice(targetLoadId, driver.companyId);
         }
         if (typeof autoCreditDriverPayroll === 'function' && driver?.id) {
-          autoPayroll = await autoCreditDriverPayroll(targetLoadId, driver.id, driver.companyId);
+          autoPayroll = await autoCreditDriverPayroll(targetLoadId, driver.id, driver.companyId, calculatedCredit);
         }
       } catch (invErr) {
         console.warn('Auto financial generation catch:', invErr?.message);
@@ -2840,8 +2975,10 @@ exports.toggleBreak = async (req, res, next) => {
       return sendError(res, { code: ERROR_CODES.NOT_FOUND, message: 'Driver profile not found' }, 404);
     }
 
-    const { action, location } = req.body; // 'start' or 'end'
-    const eventType = action === 'start' ? 'BREAK_START' : 'BREAK_END';
+    const { action, location } = req.body; // 'start' or 'end' (case-insensitive)
+    const act = (action || '').trim().toLowerCase();
+    const isStart = act === 'start';
+    const eventType = isStart ? 'BREAK_START' : 'BREAK_END';
 
     if (prisma.timesheet && prisma.timesheetEvent) {
       const today = new Date();
@@ -2863,9 +3000,9 @@ exports.toggleBreak = async (req, res, next) => {
       }
     }
 
-    const newStatus = action === 'start' ? 'On Break' : 'Clocked In';
+    const newStatus = isStart ? 'On Break' : 'Clocked In';
     return sendSuccess(res, {
-      message: action === 'start' ? 'Break started' : 'Break ended',
+      message: isStart ? 'Break started' : 'Break ended',
       status: newStatus,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     });
@@ -2912,7 +3049,7 @@ exports.clockOut = async (req, res, next) => {
 
         const totalShiftMinutes = Math.max(0, Math.round((clockOutTime.getTime() - clockInTime.getTime()) / (1000 * 60)));
 
-        // Calculate break minutes from BREAK_START -> BREAK_END events
+        // Calculate break minutes from recorded BREAK_START -> BREAK_END events only
         let totalBreakMinutes = 0;
         let breakStartEvt = null;
         allEvents.forEach(e => {
@@ -2930,11 +3067,7 @@ exports.clockOut = async (req, res, next) => {
           totalBreakMinutes += duration;
         }
 
-        // Default break fallback if no break logged and shift > 4 hours
-        if (totalBreakMinutes === 0 && totalShiftMinutes > 240) {
-          totalBreakMinutes = driver.defaultBreakMinutes || 30;
-        }
-
+        // Net paid work minutes: deduct recorded breaks only
         const netWorkMinutes = Math.max(0, totalShiftMinutes - totalBreakMinutes);
         const otThresholdMins = Math.round((driver.overtimeStartsAfter || 7.6) * 60);
         const ordinaryMinutes = Math.min(netWorkMinutes, otThresholdMins);
@@ -3230,14 +3363,22 @@ exports.getPayrollData = async (req, res, next) => {
 
         // Use readable load reference if linked
         const matchingLoad = deliveredLoads[idx] || null;
-        const ref = matchingLoad ? (matchingLoad.loadNumber || matchingLoad.loadRef || `PO-${651704 + idx}`) : `PO-${651704 + idx}`;
-        const pCity = matchingLoad?.origin?.split(',')[0] || origin.split(',')[0] || 'Emerald VIC';
-        const dCity = matchingLoad?.destination?.split(',')[0] || destination.split(',')[0] || 'Melbourne Hub VIC';
+        const loadNum = matchingLoad?.loadNumber || matchingLoad?.loadRef;
+        const ref = loadNum ? loadNum : (matchingLoad?.id ? `LD-${String(matchingLoad.id).slice(0, 8).toUpperCase()}` : `Pay Period #${idx + 1}`);
+        let pCity = matchingLoad?.origin?.split(',')[0] || origin?.split(',')[0] || '';
+        let dCity = matchingLoad?.destination?.split(',')[0] || destination?.split(',')[0] || '';
+        if (matchingLoad?.stops && matchingLoad.stops.length > 0) {
+          const pStop = matchingLoad.stops.find(s => s.type === 'PICKUP') || matchingLoad.stops[0];
+          const dStop = matchingLoad.stops.find(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || matchingLoad.stops[matchingLoad.stops.length - 1];
+          if (pStop && !pCity) pCity = (pStop.address || pStop.name || '').split(',')[0];
+          if (dStop && !dCity) dCity = (dStop.address || dStop.name || '').split(',')[0];
+        }
+        const routeTitle = (pCity && dCity) ? `${pCity} ➔ ${dCity}` : (pCity || dCity || 'General Freight');
 
         return {
           id: p.id,
           loadRef: ref,
-          period: `${ref} • ${pCity} ➔ ${dCity}`,
+          period: `${ref} • ${routeTitle}`,
           payDate: payDateStr,
           netPay: `$${(recNetPay || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           status,
@@ -3253,11 +3394,17 @@ exports.getPayrollData = async (req, res, next) => {
     // Fallback: If DB PayPeriods empty, populate Pay History from actual completed/delivered loads
     if (payRecords.length === 0 && deliveredLoads.length > 0) {
       payRecords = deliveredLoads.map((dl, idx) => {
-        const ref = dl.loadNumber || dl.loadRef || `PO-${651704 + idx}`;
-        const pStop = dl.stops?.find(s => s.type === 'PICKUP') || dl.stops?.[0];
-        const dStop = dl.stops?.find(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || dl.stops?.[dl.stops?.length - 1];
-        const pCity = pStop?.address?.split(',')[0] || dl.origin?.split(',')[0] || 'Emerald VIC';
-        const dCity = dStop?.address?.split(',')[0] || dl.destination?.split(',')[0] || 'Melbourne Hub VIC';
+        const loadNum = dl.loadNumber || dl.loadRef;
+        const ref = loadNum ? loadNum : (dl.id ? `LD-${String(dl.id).slice(0, 8).toUpperCase()}` : `Load #${idx + 1}`);
+        let pCity = dl.origin?.split(',')[0] || '';
+        let dCity = dl.destination?.split(',')[0] || '';
+        if (dl.stops && dl.stops.length > 0) {
+          const pStop = dl.stops.find(s => s.type === 'PICKUP') || dl.stops[0];
+          const dStop = dl.stops.find(s => s.type === 'DROPOFF' || s.type === 'DELIVERY') || dl.stops[dl.stops.length - 1];
+          if (pStop && !pCity) pCity = (pStop.address || pStop.name || '').split(',')[0];
+          if (dStop && !dCity) dCity = (dStop.address || dStop.name || '').split(',')[0];
+        }
+        const routeTitle = (pCity && dCity) ? `${pCity} ➔ ${dCity}` : (pCity || dCity || 'Delivered Freight');
         const dDate = dl.deliveryDate ? new Date(dl.deliveryDate) : (dl.createdAt ? new Date(dl.createdAt) : new Date());
 
         let loadPay = 0;
@@ -3265,20 +3412,27 @@ exports.getPayrollData = async (req, res, next) => {
           const m = dl.notes.match(/\[DRIVER_PAY:([0-9.]+)/);
           if (m && m[1]) loadPay = parseFloat(m[1]);
         }
-        if (loadPay <= 0) loadPay = 1700;
+        if (loadPay <= 0 && dl.notes && dl.notes.includes('[LOAD_PAID_HOURS:')) {
+          const mh = dl.notes.match(/\[LOAD_PAID_HOURS:([0-9.]+)/);
+          const drate = parseFloat(driver.payRate) || 0;
+          if (mh && mh[1]) loadPay = Math.round(parseFloat(mh[1]) * drate * 100) / 100;
+        }
+        if (loadPay <= 0) {
+          loadPay = parseFloat(driver.payRate) || 0;
+        }
 
         return {
           id: dl.id || `load-pay-${idx}`,
           loadRef: ref,
-          period: `${ref} • ${pCity} ➔ ${dCity}`,
+          period: `${ref} • ${routeTitle}`,
           payDate: `Delivered: ${dDate.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })}`,
           netPay: `$${loadPay.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-          status: 'Processed',
-          statusColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          status: 'Pending',
+          statusColor: 'bg-amber-50 text-amber-700 border-amber-200',
           amount: loadPay,
           gross: loadPay,
           tax: 0,
-          super: Math.round(loadPay * 0.115 * 100) / 100
+          super: 0
         };
       });
     }
@@ -3299,40 +3453,45 @@ exports.getPayrollData = async (req, res, next) => {
 
     const liveGross = livePay?.grossEarnings || 0;
     const dbGross = latestPeriod ? (latestPeriod.grossEarnings || latestPeriod.basePay || 0) : 0;
-    const effectiveGross = Math.max(dbGross, liveGross, 8000);
+    const effectiveGross = Math.max(dbGross, liveGross);
 
-    // Authentic ATO PAYG Tax & Superannuation (11.5% SG on Ordinary Time Earnings)
-    let effectiveTax = (latestPeriod?.paygTax || 0) > 0 ? latestPeriod.paygTax : (livePay?.paygTax || 0);
-    if (effectiveTax === 0 && effectiveGross > 0) {
-      const { calculateAtoPaygTax } = require('../utils/driverPayCalculator');
-      effectiveTax = calculateAtoPaygTax({
-        grossWeeklyPay: effectiveGross,
-        taxFreeThreshold: driver.taxFreeThreshold !== false,
-        studyLoanDebt: driver.studyLoanDebt === true,
-        residencyStatus: driver.residencyStatus || 'Australian Resident'
-      });
+    // Deductions & Superannuation: only apply if explicitly enabled on driver, and never exceed gross
+    let effectiveTax = 0;
+    if (driver.applyTaxWithholding || driver.deductTax) {
+      if ((latestPeriod?.paygTax || 0) > 0 && latestPeriod.paygTax < effectiveGross) {
+        effectiveTax = latestPeriod.paygTax;
+      } else if (effectiveGross > 0) {
+        const { calculateAtoPaygTax } = require('../utils/driverPayCalculator');
+        effectiveTax = calculateAtoPaygTax({
+          grossWeeklyPay: effectiveGross,
+          taxFreeThreshold: driver.taxFreeThreshold !== false,
+          studyLoanDebt: driver.studyLoanDebt === true,
+          residencyStatus: driver.residencyStatus || 'Australian Resident'
+        });
+        if (effectiveTax >= effectiveGross) effectiveTax = 0;
+      }
     }
 
-    const superRate = parseFloat(driver.superPercentage) || 11.5;
-    const oteAmount = livePay?.eligibleOteEarnings || Math.max(0, effectiveGross - (livePay?.overtimePay || 0));
-    const effectiveSuper = Math.round((oteAmount * (superRate / 100)) * 100) / 100;
+    let effectiveSuper = 0;
+    if (driver.applySuperannuation || driver.includeSuper) {
+      const superRate = parseFloat(driver.superPercentage) || 11.5;
+      const oteAmount = livePay?.eligibleOteEarnings || Math.max(0, effectiveGross - (livePay?.overtimePay || 0));
+      effectiveSuper = Math.round((oteAmount * (superRate / 100)) * 100) / 100;
+    }
 
     const effectiveDed = effectiveTax;
     const effectiveNetPay = Math.round(Math.max(0, effectiveGross - effectiveTax) * 100) / 100;
 
-    // Actual Unpaid / Pending Records aggregation (Issue 2)
+    // Actual Unpaid / Pending Records aggregation
     const paidRecords = payRecords.filter(r => r.status === 'Paid' || r.status === 'Processed' || r.status === 'Completed');
     const unpaidRecords = payRecords.filter(r => r.status === 'Pending' || r.status === 'Processing' || r.status === 'Scheduled' || r.status === 'Draft');
 
-    const totalNetPaid = paidRecords.reduce((s, r) => s + (r.amount || 0), 0) || 1700;
-    const totalGrossPaid = paidRecords.reduce((s, r) => s + (r.gross || r.amount || 0), 0) || 1700;
+    const totalNetPaid = paidRecords.reduce((s, r) => s + (r.amount || 0), 0);
+    const totalGrossPaid = paidRecords.reduce((s, r) => s + (r.gross || r.amount || 0), 0);
 
     let pendingPaymentsAmount = unpaidRecords.reduce((s, r) => s + (r.amount || 0), 0);
     if (pendingPaymentsAmount === 0 && effectiveNetPay > totalNetPaid) {
       pendingPaymentsAmount = Math.max(0, effectiveNetPay - totalNetPaid);
-    }
-    if (pendingPaymentsAmount === 0) {
-      pendingPaymentsAmount = 6300;
     }
 
     if (latestPeriod && effectiveGross > (latestPeriod.grossEarnings || 0)) {
