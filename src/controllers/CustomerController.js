@@ -103,6 +103,7 @@ exports.getPortalData = async (req, res, next) => {
 
     const mappedCustomers = dbCustomers.map((c) => ({
       id: c.id,
+      companyId: c.companyId,
       name: c.name,
       abn: c.abn || 'N/A',
       type: c.type === 'BUSINESS' ? 'Business' : c.type === 'CORPORATE' ? 'Corporate' : (c.type || 'Business'),

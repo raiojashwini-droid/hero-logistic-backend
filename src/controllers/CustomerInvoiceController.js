@@ -6,7 +6,7 @@ const { HTTP_STATUS, ERROR_CODES } = require('../config/constants');
 const { resolveCompanyId } = require('../middlewares/tenantResolver');
 
 const getInvoiceTenantWhere = (req) => {
-  const companyId = resolveCompanyId(req);
+  const companyId = resolveCompanyId(req) || req.query?.companyId || req.headers?.['x-company-id'];
   if (companyId) {
     return {
       OR: [
@@ -25,6 +25,7 @@ const getInvoiceTenantWhere = (req) => {
 exports.getAll = async (req, res, next) => {
   try {
     const { where, skip, take, orderBy, currentPage, pageSize } = buildPrismaQuery(req.query);
+    delete where.companyId;
     const tenantWhere = getInvoiceTenantWhere(req);
     const finalWhere = { ...where, ...tenantWhere };
 
@@ -109,6 +110,7 @@ exports.create = async (req, res, next) => {
     if (!payload.loadId || typeof payload.loadId !== 'string' || payload.loadId.trim() === '') {
       delete payload.loadId;
     }
+    delete payload.companyId;
 
     const data = await prisma.customerInvoice.create({
       data: payload,
@@ -159,6 +161,7 @@ exports.update = async (req, res, next) => {
     if (updateData.loadId !== undefined && (!updateData.loadId || updateData.loadId.trim() === '')) {
       delete updateData.loadId;
     }
+    delete updateData.companyId;
 
     const data = await prisma.customerInvoice.update({
       where: { id: existing.id },

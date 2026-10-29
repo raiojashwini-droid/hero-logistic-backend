@@ -407,7 +407,7 @@ exports.create = async (req, res, next) => {
       }
     }
 
-    if (agreedRate && data.id) {
+    if (['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(data.status) && agreedRate && data.id) {
       try {
         const { autoGenerateLoadInvoice } = require('./CompanyAdminPortalController');
         if (typeof autoGenerateLoadInvoice === 'function') {

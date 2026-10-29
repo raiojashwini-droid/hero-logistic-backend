@@ -813,11 +813,9 @@ exports.autoGenerateLoadInvoice = async (loadId, companyId, customAmount = null)
 
     if (!targetLoad) return null;
 
-    // Evaluate Billing Readiness (Allow DRAFT invoice creation if load is DELIVERED/COMPLETED)
-    const PricingService = require('../services/PricingService');
-    const billingStatus = await PricingService.evaluateBillingStatus(loadId).catch(() => 'READY_TO_INVOICE');
+    // Evaluate Billing Readiness (STRICT: Invoices only created when load is DELIVERED/COMPLETED)
     const isCompletedStatus = ['DELIVERED', 'COMPLETED', 'FULFILLED', 'CLOSED'].includes(targetLoad.status);
-    if (billingStatus !== 'READY_TO_INVOICE' && !isCompletedStatus && !customAmount) return null;
+    if (!isCompletedStatus) return null;
 
     const targetCompanyId = companyId || targetLoad.companyId;
 
