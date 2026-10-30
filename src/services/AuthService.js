@@ -44,7 +44,81 @@ class AuthService {
       };
     }
 
-    // If user is NOT registered in database -> Reject immediately (No auto-create, no heuristic fallback!)
+    // Demo accounts handler for instant role card logins (*@hero.com / 123456)
+    const demoRoleMap = {
+      'super-admin@hero.com': { role: 'SUPER_ADMIN', name: 'Super Admin', isSuper: true },
+      'company-admin@hero.com': { role: 'COMPANY_ADMIN', name: 'Company Admin' },
+      'sales@hero.com': { role: 'SALES', name: 'Sales Representative' },
+      'dispatcher@hero.com': { role: 'DISPATCHER', name: 'Operations Dispatcher' },
+      'driver@hero.com': { role: 'DRIVER', name: 'Alex Vance (Driver)' },
+      'warehouse@hero.com': { role: 'WAREHOUSE', name: 'Warehouse Manager' },
+      'yard@hero.com': { role: 'YARD', name: 'Yard Attendant' },
+      'accounts@hero.com': { role: 'ACCOUNTS', name: 'Accounts Manager' },
+      'customer@hero.com': { role: 'CUSTOMER', name: 'Enterprise Client' }
+    };
+
+    if (demoRoleMap[cleanEmail] && cleanPassword === '123456') {
+      const demoConfig = demoRoleMap[cleanEmail];
+      if (!user) {
+        let comp = demoConfig.isSuper ? null : await prisma.company.findFirst({ where: { status: 'ACTIVE' }, orderBy: { createdAt: 'asc' } });
+        if (!comp && !demoConfig.isSuper) {
+          comp = await prisma.company.findFirst({ orderBy: { createdAt: 'asc' } });
+        }
+        if (!comp && !demoConfig.isSuper) {
+          try {
+            comp = await prisma.company.create({
+              data: {
+                name: 'Hero Logistics Enterprise',
+                status: 'ACTIVE',
+                defaultNiche: 'General Freight'
+              }
+            });
+          } catch (e) {}
+        }
+        const hashedPassword = await bcrypt.hash('123456', 10);
+        user = await prisma.user.create({
+          data: {
+            email: cleanEmail,
+            password: hashedPassword,
+            name: demoConfig.name,
+            role: demoConfig.role,
+            status: 'ACTIVE',
+            companyId: comp ? comp.id : null
+          },
+          include: { company: true, customRole: true, driverProfile: { include: { currentVehicle: true } } }
+        });
+        if (demoConfig.role === 'DRIVER' && comp) {
+          await prisma.driver.create({
+            data: {
+              userId: user.id,
+              companyId: comp.id,
+              driverCode: 'DRV-HERO-01',
+              status: 'AVAILABLE',
+              licenseType: 'HC',
+              licenseNumber: 'LIC-HERO-01',
+              payType: 'Hourly',
+              payRate: 35.00
+            }
+          }).catch(() => null);
+        }
+      } else {
+        const isMatch = await bcrypt.compare(cleanPassword, user.password).catch(() => false);
+        if (!isMatch || user.status !== 'ACTIVE' || user.role !== demoConfig.role) {
+          const hashedPassword = await bcrypt.hash('123456', 10);
+          user = await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              password: hashedPassword,
+              status: 'ACTIVE',
+              role: demoConfig.role
+            },
+            include: { company: true, customRole: true, driverProfile: { include: { currentVehicle: true } } }
+          });
+        }
+      }
+    }
+
+    // If user is NOT registered in database -> Reject immediately
     if (!user) {
       throw {
         code: 'INVALID_CREDENTIALS',
