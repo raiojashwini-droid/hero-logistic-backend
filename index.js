@@ -47,9 +47,19 @@ app.use('/api/v1', apiRoutes);
 app.use('/api', apiRoutes);
 
 
-// Health check endpoint
+// Health check and demo sync endpoints
 app.get('/', (req, res) => {
-  res.json({ message: 'Hero Logistics Backend API is running', status: 'OK' });
+  res.json({ message: 'Hero Logistics Backend API is running', status: 'OK', version: '2026-10-30-demo-sync-v1' });
+});
+
+app.all('/api/v1/auth/ensure-demo', async (req, res) => {
+  try {
+    const ensureDemoUsers = require('./src/utils/seedDemoUsers');
+    await ensureDemoUsers();
+    res.json({ success: true, message: 'All 9 demo portal accounts synchronized' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // Global Error handling middleware
@@ -63,6 +73,12 @@ app.listen(PORT, async () => {
     await syncMissingVehicleColumns();
   } catch (err) {
     console.warn('Startup DB column sync notice:', err.message);
+  }
+  try {
+    const ensureDemoUsers = require('./src/utils/seedDemoUsers');
+    await ensureDemoUsers();
+  } catch (err) {
+    console.warn('Startup Demo users sync notice:', err.message);
   }
 });
 
